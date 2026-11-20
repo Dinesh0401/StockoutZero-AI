@@ -11,10 +11,11 @@ Observed sales and stock quantities are integer counts. Fractional quantities ar
 Each observation must contain recorded sales and may contain sellable stock available. Unknown stock availability must remain null rather than zero.
 
 ## Metrics
-Evaluate latent-demand MAE, predictive interval coverage, stockout rate, fill rate, excess inventory, inventory cost, and audit value.
+Evaluate latent-demand MAE, predictive interval coverage, stockout rate, fill rate, excess inventory, inventory cost, and audit value. Every benchmark must report total trials, successful estimates, failure rate, and accuracy calculated only on successful trials. Bootstrap confidence intervals must be paired with the failure rate rather than hiding failed trials.
 
 ## Required comparisons
 - Sales mean
+- Moving average
 - Moving average
 - Croston / TSB
 - Uncensored count model

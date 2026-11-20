@@ -43,6 +43,12 @@ def test_all_zero_known_stock_observations_are_not_confident_demand():
     assert result["status"] == "insufficient_information"
 
 
+def test_zero_sales_with_stock_is_a_boundary_estimate():
+    result = estimate_demand([{"sales": 0, "available_stock": 10}] * 7)
+    assert result["status"] == "boundary_estimate"
+    assert result["estimated_daily_demand"] is not None
+
+
 def test_fractional_sales_are_rejected():
     with pytest.raises(ValueError):
         estimate_demand([{"sales": 2.5, "available_stock": 10}])
