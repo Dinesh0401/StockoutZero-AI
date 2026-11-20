@@ -27,6 +27,7 @@ class ForecastCase:
 
     sales: tuple[int, ...]
     observations: tuple[dict[str, int | None], ...]
+    future_demand: tuple[int, ...] = ()
 
 
 CaseBaseline = Callable[[ForecastCase], BaselineEstimate]
