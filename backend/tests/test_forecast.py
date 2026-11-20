@@ -1,5 +1,4 @@
 import pytest
-
 from app.forecast import estimate_demand, recommend_reorder
 
 
@@ -55,7 +54,12 @@ def test_fractional_sales_are_rejected():
 
 
 def test_reorder_is_case_pack_aligned():
-    result = recommend_reorder([{"sales": 5, "available_stock": 10}] * 7, lead_time_days=7, on_hand=0, case_pack=12)
+    result = recommend_reorder(
+        [{"sales": 5, "available_stock": 10}] * 7,
+        lead_time_days=7,
+        on_hand=0,
+        case_pack=12,
+    )
     assert result["suggested_units"] % 12 == 0
 
 
