@@ -34,7 +34,7 @@ def run(trials: int = 100, seed: int = 42, demand_process: str = "poisson"):
         true_mean = sum(latent_values) / len(latent_values)
         naive_mean = sum(row["sales"] for row in observations) / len(observations)
 
-        if estimate > 0:
+        if result["status"] == "estimated" and estimate is not None:
             successful += 1
             censored_mae.append(abs(estimate - true_mean))
             naive_mae.append(abs(naive_mean - true_mean))
