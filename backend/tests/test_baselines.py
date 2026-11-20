@@ -25,6 +25,7 @@ def test_censored_baseline_reports_non_identifiability():
 
 def test_evaluation_reports_failures_separately():
     histories = [[0, 0], [2, 3], [4, 5]]
+
     def requires_positive_history(history):
         if not any(history):
             return BaselineEstimate("test_baseline", None, "insufficient_information")

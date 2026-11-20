@@ -1,11 +1,16 @@
 import random
-
-import numpy as np
+from importlib import import_module
 
 from app.forecast import estimate_demand
 
+np = import_module("numpy")
 
-def run(trials: int = 100, seed: int = 42, demand_process: str = "poisson"):
+
+def run(
+    trials: int = 100,
+    seed: int = 42,
+    demand_process: str = "poisson",
+) -> None:
     rng = random.Random(seed)
     np_rng = np.random.default_rng(seed)
     censored_mae = []
@@ -19,7 +24,9 @@ def run(trials: int = 100, seed: int = 42, demand_process: str = "poisson"):
             mean = 16.5
             dispersion = 4.0
             probability = dispersion / (dispersion + mean)
-            latent_values = np_rng.negative_binomial(dispersion, probability, size=14).tolist()
+            latent_values = np_rng.negative_binomial(
+                dispersion, probability, size=14
+            ).tolist()
         else:
             raise ValueError("demand_process must be 'poisson' or 'negative_binomial'")
 
@@ -42,8 +49,12 @@ def run(trials: int = 100, seed: int = 42, demand_process: str = "poisson"):
     print(f"Synthetic stationary-{demand_process.replace('_', ' ').title()} simulation")
     print(f"Trials: {trials}")
     print(f"Successful estimates: {successful}")
-    print(f"Naive sales mean MAE: {sum(naive_mae) / len(naive_mae) if naive_mae else 0:.3f}")
-    print(f"Censored model MAE: {sum(censored_mae) / len(censored_mae) if censored_mae else 0:.3f}")
+    naive_error = sum(naive_mae) / len(naive_mae) if naive_mae else 0
+    censored_error = (
+        sum(censored_mae) / len(censored_mae) if censored_mae else 0
+    )
+    print(f"Naive sales mean MAE: {naive_error:.3f}")
+    print(f"Censored model MAE: {censored_error:.3f}")
 
 
 if __name__ == "__main__":

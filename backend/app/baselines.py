@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from math import isnan
-from typing import Callable, Sequence
 
 from .forecast import estimate_demand
 
@@ -19,6 +19,17 @@ class BaselineEstimate:
 
 
 Baseline = Callable[[Sequence[int]], BaselineEstimate]
+
+
+@dataclass(frozen=True)
+class ForecastCase:
+    """One evaluation case containing sales and optional stock observations."""
+
+    sales: tuple[int, ...]
+    observations: tuple[dict[str, int | None], ...]
+
+
+CaseBaseline = Callable[[ForecastCase], BaselineEstimate]
 
 
 def sales_mean(sales: Sequence[int]) -> BaselineEstimate:
@@ -57,7 +68,9 @@ def croston(sales: Sequence[int], alpha: float = 0.1) -> BaselineEstimate:
     return BaselineEstimate("croston", demand / interval)
 
 
-def tsb(sales: Sequence[int], alpha: float = 0.1, beta: float = 0.1) -> BaselineEstimate:
+def tsb(
+    sales: Sequence[int], alpha: float = 0.1, beta: float = 0.1
+) -> BaselineEstimate:
     """Estimate intermittent demand using the Teunter-Syntetos-Babai method."""
     if not 0 < alpha <= 1 or not 0 < beta <= 1:
         raise ValueError("TSB alpha and beta must be between 0 and 1")
@@ -103,3 +116,15 @@ def default_baselines(sales: Sequence[int]) -> list[BaselineEstimate]:
         tsb(sales),
         poisson_uncensored(sales),
     ]
+
+
+def baseline_suite() -> dict[str, CaseBaseline]:
+    """Return all six baselines behind one case-based forecasting interface."""
+    return {
+        "sales_mean": lambda case: sales_mean(case.sales),
+        "moving_average": lambda case: moving_average(case.sales),
+        "croston": lambda case: croston(case.sales),
+        "tsb": lambda case: tsb(case.sales),
+        "poisson_uncensored": lambda case: poisson_uncensored(case.sales),
+        "poisson_censored": lambda case: poisson_censored(case.observations),
+    }

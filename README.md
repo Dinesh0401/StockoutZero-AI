@@ -22,4 +22,18 @@ cd backend
 python -m research.simulate
 ```
 
+Run the Phase 2B.1 six-baseline benchmark for 30-day and 90-day histories:
+
+```powershell
+cd backend
+python -m research.benchmark
+```
+
+Quality checks:
+
+```powershell
+python -m ruff check app research tests
+python -m mypy app research
+```
+
 See [product specification](docs/PRODUCT_SPEC.md) and [research protocol](docs/RESEARCH_PROTOCOL.md).

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import math
-from typing import Iterable, Mapping
+from collections.abc import Iterable, Mapping
+from typing import cast
 
 from scipy.optimize import brentq, minimize_scalar
 from scipy.stats import poisson
@@ -53,25 +54,33 @@ def estimate_demand(observations: Iterable[Mapping[str, object]]) -> dict:
         available = row.get("available_stock", row.get("available"))
 
         try:
-            sales_value = float(sales)
+            sales_value = float(cast(str | float | int, sales))
         except (TypeError, ValueError):
-            raise ValueError("Sales must be a non-negative whole number")
-        if not math.isfinite(sales_value) or sales_value < 0 or not sales_value.is_integer():
+            raise ValueError("Sales must be a non-negative whole number") from None
+        if (
+            not math.isfinite(sales_value)
+            or sales_value < 0
+            or not sales_value.is_integer()
+        ):
             raise ValueError("Sales must be a non-negative whole number")
 
         if available is None:
             continue
 
         try:
-            available_value = float(available)
+            available_value = float(cast(str | float | int, available))
         except (TypeError, ValueError):
-            raise ValueError("Available stock must be a non-negative whole number or null")
+            raise ValueError(
+                "Available stock must be a non-negative whole number or null"
+            ) from None
         if (
             not math.isfinite(available_value)
             or available_value < 0
             or not available_value.is_integer()
         ):
-            raise ValueError("Available stock must be a non-negative whole number or null")
+            raise ValueError(
+                "Available stock must be a non-negative whole number or null"
+            )
         if sales_value > available_value:
             raise ValueError("Recorded sales cannot exceed available stock")
 
@@ -87,14 +96,20 @@ def estimate_demand(observations: Iterable[Mapping[str, object]]) -> dict:
 
     if not usable:
         return insufficient_result(
-            warning="Insufficient information: no usable positive-stock observations were supplied.",
+            warning=(
+                "Insufficient information: no usable positive-stock observations "
+                "were supplied."
+            ),
         )
 
     if informative_count == 0:
         return insufficient_result(
             censored_count=censored_count,
             usable_observations=len(usable),
-            warning="Insufficient information: all usable observations are censored, so latent demand is not identifiable.",
+            warning=(
+                "Insufficient information: all usable observations are censored, "
+                "so latent demand is not identifiable."
+            ),
         )
 
     max_sale = max(sales for sales, _ in usable)
@@ -146,7 +161,10 @@ def estimate_demand(observations: Iterable[Mapping[str, object]]) -> dict:
     status = "estimated"
     if all(sales == 0 for sales, _ in usable):
         status = "boundary_estimate"
-        warning = "Boundary estimate near zero: no sales were observed while stock was available."
+        warning = (
+            "Boundary estimate near zero: no sales were observed while stock was "
+            "available."
+        )
     if len(usable) < 7:
         warning = "Sparse history: estimate has high parameter uncertainty."
     elif censor_share >= 0.5:
