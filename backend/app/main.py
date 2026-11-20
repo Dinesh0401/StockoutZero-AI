@@ -11,8 +11,8 @@ app = FastAPI(title="StockoutZero AI", version="0.1.0")
 
 
 class Observation(BaseModel):
-    sales: float = Field(ge=0)
-    available_stock: Optional[float] = Field(default=None, ge=0)
+    sales: int = Field(ge=0)
+    available_stock: Optional[int] = Field(default=None, ge=0)
 
 
 class EstimateRequest(BaseModel):

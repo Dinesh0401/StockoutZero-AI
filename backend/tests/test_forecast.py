@@ -21,12 +21,31 @@ def test_sales_exceed_stock_rejected():
 def test_unknown_stock_is_distinct_from_zero():
     result = estimate_demand([{"sales": 5, "available_stock": None}])
     assert result["usable_observations"] == 0
-    assert "unknown" in result["warning"].lower()
+    assert result["status"] == "insufficient_information"
 
 
 def test_censored_observation_is_counted():
+    result = estimate_demand(
+        [{"sales": 10, "available_stock": 10}] * 6
+        + [{"sales": 8, "available_stock": 12}]
+    )
+    assert result["censored_observations"] == 6
+
+
+def test_all_positive_censored_observations_are_not_identifiable():
     result = estimate_demand([{"sales": 10, "available_stock": 10}] * 7)
-    assert result["censored_observations"] == 7
+    assert result["status"] == "insufficient_information"
+    assert result["estimated_daily_demand"] is None
+
+
+def test_all_zero_known_stock_observations_are_not_confident_demand():
+    result = estimate_demand([{"sales": 0, "available_stock": 0}] * 7)
+    assert result["status"] == "insufficient_information"
+
+
+def test_fractional_sales_are_rejected():
+    with pytest.raises(ValueError):
+        estimate_demand([{"sales": 2.5, "available_stock": 10}])
 
 
 def test_reorder_is_case_pack_aligned():
@@ -42,3 +61,9 @@ def test_reorder_rejects_invalid_pack():
 def test_forecast_intervals_are_non_negative():
     result = estimate_demand([{"sales": 8, "available_stock": 10}] * 10)
     assert 0 <= result["p10"] <= result["p50"] <= result["p90"]
+
+
+def test_reorder_stops_when_demand_is_not_identifiable():
+    result = recommend_reorder([{"sales": 10, "available_stock": 10}] * 7)
+    assert result["status"] == "insufficient_information"
+    assert result["suggested_units"] is None
