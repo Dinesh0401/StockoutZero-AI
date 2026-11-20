@@ -56,9 +56,10 @@ document.querySelector('#run').addEventListener('click', async () => {
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || 'Request failed');
     result.className = '';
-    result.innerHTML = `<div class="metric">${data.suggested_units} units</div><strong>Suggested reorder</strong><br><br>`+
-      `Estimated demand: ${data.estimated_daily_demand} units/day<br>`+
-      `Forecast range: ${data.p10}–${data.p90} units/day<br>`+
+    const reorder = data.suggested_units === null ? 'No safe reorder quantity' : `${data.suggested_units} units`;
+    result.innerHTML = `<div class="metric">${reorder}</div><strong>Suggested reorder</strong><br><br>`+
+      `Estimated demand: ${data.estimated_daily_demand === null ? 'Not identifiable' : data.estimated_daily_demand + ' units/day'}<br>`+
+      `Forecast range: ${data.p10 === null ? 'Unavailable' : data.p10 + '–' + data.p90 + ' units/day'}<br>`+
       `Censored observations: ${data.censored_observations} of ${data.usable_observations}<br>`+
       (data.warning ? `<br>⚠ ${data.warning}` : '');
   } catch (error) { result.className=''; result.textContent = 'Error: ' + error.message; }
