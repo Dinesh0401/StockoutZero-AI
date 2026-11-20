@@ -1,6 +1,6 @@
 from app.baselines import ForecastCase, baseline_suite
 from research.benchmark import BenchmarkConfig, make_cases
-from research.evaluation import evaluate_suite
+from research.evaluation import evaluate_suite, paired_mae_difference
 from research.inventory import simulate_inventory
 
 
@@ -39,9 +39,29 @@ def test_suite_reports_every_baseline():
     assert all(summary.trials == 4 for summary in result.summaries.values())
 
 
+def test_paired_comparison_returns_difference_interval():
+    cases, means = make_cases(BenchmarkConfig(history_days=30, trials=4))
+    difference, interval = paired_mae_difference(
+        baseline_suite()["sales_mean"],
+        baseline_suite()["poisson_censored"],
+        cases,
+        means,
+    )
+    assert difference is not None
+    assert interval is not None
+    assert interval[0] <= interval[1]
+
+
 def test_inventory_simulation_reports_cost_and_service():
     result = simulate_inventory([5, 0, 10], [5, 5, 5], initial_stock=0)
     assert result.orders == 2
     assert result.stockout_units == 5
     assert 0 < result.fill_rate < 1
     assert result.total_cost > 0
+
+
+def test_inventory_simulation_tracks_lead_time_purchase_orders():
+    result = simulate_inventory([5, 0, 0], [5, 5, 5], lead_time_days=2)
+    assert result.orders == 1
+    assert result.fulfilled_units == 0
+    assert result.stockout_units == 5

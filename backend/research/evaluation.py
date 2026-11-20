@@ -18,6 +18,7 @@ class EvaluationSummary:
     failure_rate: float
     mae: float | None
     bootstrap_mae_interval_90: tuple[float, float] | None
+    interval_coverage: float | None = None
 
 
 @dataclass(frozen=True)
@@ -91,11 +92,16 @@ def evaluate_suite(
     summaries: dict[str, EvaluationSummary] = {}
     for offset, (name, baseline) in enumerate(baselines.items()):
         errors: list[float] = []
-        for case, true_mean in zip(cases, true_means, strict=True):
-            result = baseline(case)
+        results = [baseline(case) for case in cases]
+        for result, true_mean in zip(results, true_means, strict=True):
             if result.status == "estimated" and result.estimate is not None:
                 errors.append(abs(result.estimate - true_mean))
         trials = len(cases)
+        interval_hits = [
+            result.interval[0] <= true_mean <= result.interval[1]
+            for result, true_mean in zip(results, true_means, strict=True)
+            if result.interval is not None
+        ]
         summaries[name] = EvaluationSummary(
             name=name,
             trials=trials,
@@ -103,5 +109,38 @@ def evaluate_suite(
             failure_rate=(trials - len(errors)) / trials,
             mae=sum(errors) / len(errors) if errors else None,
             bootstrap_mae_interval_90=_bootstrap_interval(errors, seed + offset),
+            interval_coverage=(
+                sum(interval_hits) / len(interval_hits) if interval_hits else None
+            ),
         )
     return SuiteEvaluation(summaries)
+
+
+def paired_mae_difference(
+    first: CaseBaseline,
+    second: CaseBaseline,
+    cases: Sequence[ForecastCase],
+    true_means: Sequence[float],
+    seed: int = 42,
+) -> tuple[float | None, tuple[float, float] | None]:
+    """Compare two models on paired cases with a bootstrap interval."""
+    if len(cases) != len(true_means):
+        raise ValueError("Cases and true means must have equal lengths")
+    differences: list[float] = []
+    for case, true_mean in zip(cases, true_means, strict=True):
+        first_result = first(case)
+        second_result = second(case)
+        if (
+            first_result.status == "estimated"
+            and second_result.status == "estimated"
+            and first_result.estimate is not None
+            and second_result.estimate is not None
+        ):
+            differences.append(
+                abs(first_result.estimate - true_mean)
+                - abs(second_result.estimate - true_mean)
+            )
+    return (
+        sum(differences) / len(differences) if differences else None,
+        _bootstrap_interval(differences, seed),
+    )

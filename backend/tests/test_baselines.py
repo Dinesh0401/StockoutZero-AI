@@ -1,3 +1,4 @@
+import pytest
 from app.baselines import (
     BaselineEstimate,
     croston,
@@ -15,6 +16,14 @@ def test_sales_only_baselines_return_estimates():
     assert moving_average(history, window=3).estimate == 3
     assert croston(history).estimate is not None
     assert tsb(history).estimate is not None
+
+
+def test_croston_reference_sequence():
+    assert croston([0, 4, 0, 0, 6, 0, 3]).estimate == pytest.approx(1.9521531100)
+
+
+def test_tsb_reference_sequence():
+    assert tsb([4, 0, 0, 6, 0, 3]).estimate == pytest.approx(3.1476792)
 
 
 def test_censored_baseline_reports_non_identifiability():

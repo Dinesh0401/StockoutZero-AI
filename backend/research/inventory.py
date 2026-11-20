@@ -31,24 +31,38 @@ def simulate_inventory(
     reorder_points: Sequence[int],
     costs: InventoryCosts = InventoryCosts(),
     initial_stock: int = 0,
+    lead_time_days: int = 0,
 ) -> InventorySimulation:
-    """Simulate daily replenishment decisions with immediate receipt."""
+    """Simulate daily replenishment decisions with outstanding purchase orders."""
     if len(demand) != len(reorder_points):
         raise ValueError("Demand and reorder points must have equal lengths")
     if initial_stock < 0:
         raise ValueError("Initial stock cannot be negative")
+    if lead_time_days < 0:
+        raise ValueError("Lead time cannot be negative")
 
     stock = initial_stock
+    arrivals: dict[int, int] = {}
     total_cost = 0.0
     stockout_units = 0
     fulfilled_units = 0
     orders = 0
-    for actual, reorder_point in zip(demand, reorder_points, strict=True):
+    for day, (actual, reorder_point) in enumerate(
+        zip(demand, reorder_points, strict=True)
+    ):
         if actual < 0 or reorder_point < 0:
             raise ValueError("Demand and reorder points cannot be negative")
-        if stock < reorder_point:
-            ordered = reorder_point - stock
-            stock += ordered
+        stock += arrivals.pop(day, 0)
+        inventory_position = stock + sum(
+            quantity for arrival_day, quantity in arrivals.items() if arrival_day > day
+        )
+        if inventory_position < reorder_point:
+            ordered = reorder_point - inventory_position
+            if lead_time_days == 0:
+                stock += ordered
+            else:
+                arrivals.setdefault(day + lead_time_days, 0)
+                arrivals[day + lead_time_days] += ordered
             total_cost += ordered * costs.purchase
             orders += int(ordered > 0)
         fulfilled = min(stock, actual)

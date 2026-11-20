@@ -50,9 +50,7 @@ def run(
     print(f"Trials: {trials}")
     print(f"Successful estimates: {successful}")
     naive_error = sum(naive_mae) / len(naive_mae) if naive_mae else 0
-    censored_error = (
-        sum(censored_mae) / len(censored_mae) if censored_mae else 0
-    )
+    censored_error = sum(censored_mae) / len(censored_mae) if censored_mae else 0
     print(f"Naive sales mean MAE: {naive_error:.3f}")
     print(f"Censored model MAE: {censored_error:.3f}")
 

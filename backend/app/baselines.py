@@ -16,6 +16,7 @@ class BaselineEstimate:
     name: str
     estimate: float | None
     status: str = "estimated"
+    interval: tuple[float, float] | None = None
 
 
 Baseline = Callable[[Sequence[int]], BaselineEstimate]
@@ -105,7 +106,13 @@ def poisson_censored(
     estimate = result["estimated_daily_demand"]
     if estimate is None or isnan(float(estimate)):
         return BaselineEstimate("poisson_censored", None, "insufficient_information")
-    return BaselineEstimate("poisson_censored", float(estimate))
+    interval = result.get("mean_interval_90")
+    bounds = (
+        (float(interval[0]), float(interval[1]))
+        if interval is not None and len(interval) == 2
+        else None
+    )
+    return BaselineEstimate("poisson_censored", float(estimate), interval=bounds)
 
 
 def default_baselines(sales: Sequence[int]) -> list[BaselineEstimate]:

@@ -18,6 +18,7 @@ class BenchmarkConfig:
     """Configuration for a reproducible latent-demand benchmark."""
 
     history_days: int
+    forecast_days: int = 14
     trials: int = 100
     seed: int = 42
     demand_process: str = "poisson"
@@ -35,33 +36,35 @@ def make_cases(config: BenchmarkConfig) -> tuple[list[ForecastCase], list[float]
     cases: list[ForecastCase] = []
     true_means: list[float] = []
     for _ in range(config.trials):
+        total_days = config.history_days + config.forecast_days
         if config.demand_process == "poisson":
-            latent = np_rng.poisson(16.5, config.history_days).tolist()
+            latent = np_rng.poisson(16.5, total_days).tolist()
         elif config.demand_process == "negative_binomial":
             dispersion = 4.0
             probability = dispersion / (dispersion + 16.5)
             latent = np_rng.negative_binomial(
-                dispersion, probability, config.history_days
+                dispersion, probability, total_days
             ).tolist()
         else:
             raise ValueError("Unsupported demand process")
 
         observations: list[dict[str, int | None]] = []
         sales_history: list[int] = []
-        for demand in latent:
+        for demand in latent[: config.history_days]:
             available = rng.choice([0, 8, 12, 18, 24, 30])
             sales = min(int(demand), available)
             sales_history.append(sales)
-            observations.append(
-                {"sales": sales, "available_stock": available}
-            )
+            observations.append({"sales": sales, "available_stock": available})
         cases.append(
             ForecastCase(
                 sales=tuple(sales_history),
                 observations=tuple(observations),
+                future_demand=tuple(
+                    int(value) for value in latent[config.history_days :]
+                ),
             )
         )
-        true_means.append(float(np.mean(latent)))
+        true_means.append(float(np.mean(latent[config.history_days :])))
     return cases, true_means
 
 
