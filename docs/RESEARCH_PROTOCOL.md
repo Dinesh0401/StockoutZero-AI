@@ -30,13 +30,17 @@ It reports success coverage, failure rate, MAE among successful estimates, and
 a bootstrap 90% interval for MAE. Paired model comparisons use the same cases
 and report bootstrap intervals for the MAE difference.
 The benchmark currently covers stationary Poisson and Negative Binomial
-processes; it is not evidence that the censored model generalizes to live
-retail data.
+processes, configurable demand means, intermittent-demand probability, and
+ample/mixed/severe availability profiles; it is not evidence that the
+censored model generalizes to live retail data.
 
 The sequential inventory simulator in `research.inventory` tracks outstanding
 purchase orders, supplier lead time, purchase/holding/stockout costs, and fill
 rate. Reorder points are still supplied by the experiment, so a future phase
-must connect them to rolling forecasts and supplier policies.
+must connect them to rolling forecasts and supplier policies. The
+`simulate_forecast_policy` helper provides that forecast-driven path, while
+production experiments still need calibrated safety stock and supplier
+constraints.
 
 ## Limitations
 The Poisson likelihood excludes hierarchical, promotional, temporal, and uncertain-stock effects. The simulator currently supports stationary Poisson and Negative Binomial latent demand, but does not yet implement the full 30/90-day benchmark matrix, sequential inventory costs, or calibrated predictive intervals. Synthetic results must report excluded trials and uncertainty.

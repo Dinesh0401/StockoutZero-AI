@@ -1,7 +1,7 @@
 from app.baselines import ForecastCase, baseline_suite
 from research.benchmark import BenchmarkConfig, make_cases
 from research.evaluation import evaluate_suite, paired_mae_difference
-from research.inventory import simulate_inventory
+from research.inventory import simulate_forecast_policy, simulate_inventory
 
 
 def test_all_six_baselines_share_one_interface():
@@ -65,3 +65,28 @@ def test_inventory_simulation_tracks_lead_time_purchase_orders():
     assert result.orders == 1
     assert result.fulfilled_units == 0
     assert result.stockout_units == 5
+
+
+def test_forecast_policy_drives_reorder_points():
+    result = simulate_forecast_policy(
+        demand=[4, 4, 0],
+        daily_forecast=[4, 4, 4],
+        lead_time_days=1,
+        initial_stock=0,
+    )
+    assert result.orders > 0
+    assert result.fulfilled_units > 0
+
+
+def test_benchmark_supports_demand_and_availability_regimes():
+    cases, means = make_cases(
+        BenchmarkConfig(
+            history_days=30,
+            trials=3,
+            demand_mean=8,
+            intermittent_probability=0.5,
+            availability_profile="severe",
+        )
+    )
+    assert len(cases) == len(means) == 3
+    assert any(value == 0 for value in cases[0].sales)

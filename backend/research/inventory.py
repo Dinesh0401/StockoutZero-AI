@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from math import ceil
 
 
 @dataclass(frozen=True)
@@ -79,4 +80,30 @@ def simulate_inventory(
         fulfilled_units=fulfilled_units,
         fill_rate=fulfilled_units / total_demand if total_demand else 1.0,
         orders=orders,
+    )
+
+
+def simulate_forecast_policy(
+    demand: Sequence[int],
+    daily_forecast: Sequence[float],
+    lead_time_days: int,
+    safety_days: float = 0.0,
+    costs: InventoryCosts = InventoryCosts(),
+    initial_stock: int = 0,
+) -> InventorySimulation:
+    """Convert rolling forecasts into lead-time reorder points and simulate them."""
+    if len(demand) != len(daily_forecast):
+        raise ValueError("Demand and forecasts must have equal lengths")
+    if lead_time_days < 0 or safety_days < 0:
+        raise ValueError("Lead time and safety days cannot be negative")
+    reorder_points = [
+        ceil(max(0.0, forecast) * (lead_time_days + safety_days))
+        for forecast in daily_forecast
+    ]
+    return simulate_inventory(
+        demand,
+        reorder_points,
+        costs=costs,
+        initial_stock=initial_stock,
+        lead_time_days=lead_time_days,
     )

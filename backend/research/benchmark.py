@@ -22,6 +22,9 @@ class BenchmarkConfig:
     trials: int = 100
     seed: int = 42
     demand_process: str = "poisson"
+    demand_mean: float = 16.5
+    intermittent_probability: float = 0.0
+    availability_profile: str = "mixed"
 
 
 def make_cases(config: BenchmarkConfig) -> tuple[list[ForecastCase], list[float]]:
@@ -30,6 +33,17 @@ def make_cases(config: BenchmarkConfig) -> tuple[list[ForecastCase], list[float]
         raise ValueError("history_days must be 30 or 90")
     if config.trials < 1:
         raise ValueError("trials must be positive")
+    if config.demand_mean <= 0:
+        raise ValueError("demand_mean must be positive")
+    if not 0 <= config.intermittent_probability < 1:
+        raise ValueError("intermittent_probability must be in [0, 1)")
+    availability = {
+        "ample": [18, 24, 30, 36],
+        "mixed": [0, 8, 12, 18, 24, 30],
+        "severe": [0, 0, 4, 8, 12],
+    }
+    if config.availability_profile not in availability:
+        raise ValueError("Unsupported availability profile")
 
     rng = random.Random(config.seed)
     np_rng = np.random.default_rng(config.seed)
@@ -38,20 +52,25 @@ def make_cases(config: BenchmarkConfig) -> tuple[list[ForecastCase], list[float]
     for _ in range(config.trials):
         total_days = config.history_days + config.forecast_days
         if config.demand_process == "poisson":
-            latent = np_rng.poisson(16.5, total_days).tolist()
+            latent = np_rng.poisson(config.demand_mean, total_days).tolist()
         elif config.demand_process == "negative_binomial":
             dispersion = 4.0
-            probability = dispersion / (dispersion + 16.5)
+            probability = dispersion / (dispersion + config.demand_mean)
             latent = np_rng.negative_binomial(
                 dispersion, probability, total_days
             ).tolist()
         else:
             raise ValueError("Unsupported demand process")
 
+        if config.intermittent_probability:
+            active = np_rng.random(total_days) >= config.intermittent_probability
+            latent = [
+                value if active[index] else 0 for index, value in enumerate(latent)
+            ]
         observations: list[dict[str, int | None]] = []
         sales_history: list[int] = []
         for demand in latent[: config.history_days]:
-            available = rng.choice([0, 8, 12, 18, 24, 30])
+            available = rng.choice(availability[config.availability_profile])
             sales = min(int(demand), available)
             sales_history.append(sales)
             observations.append({"sales": sales, "available_stock": available})
