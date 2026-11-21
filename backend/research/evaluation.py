@@ -80,12 +80,15 @@ def evaluate_baseline(
 def evaluate_suite(
     baselines: dict[str, CaseBaseline],
     cases: Sequence[ForecastCase],
-    true_means: Sequence[float],
+    future_means: Sequence[float],
     seed: int = 42,
+    parameter_means: Sequence[float] | None = None,
 ) -> SuiteEvaluation:
     """Evaluate all baselines with identical trials and failure accounting."""
-    if len(cases) != len(true_means):
-        raise ValueError("Cases and true means must have equal lengths")
+    if len(cases) != len(future_means):
+        raise ValueError("Cases and future means must have equal lengths")
+    if parameter_means is not None and len(parameter_means) != len(cases):
+        raise ValueError("Cases and parameter means must have equal lengths")
     if not cases:
         raise ValueError("At least one case is required")
 
@@ -93,13 +96,17 @@ def evaluate_suite(
     for offset, (name, baseline) in enumerate(baselines.items()):
         errors: list[float] = []
         results = [baseline(case) for case in cases]
-        for result, true_mean in zip(results, true_means, strict=True):
+        for result, true_mean in zip(results, future_means, strict=True):
             if result.status == "estimated" and result.estimate is not None:
                 errors.append(abs(result.estimate - true_mean))
         trials = len(cases)
         interval_hits = [
             result.interval[0] <= true_mean <= result.interval[1]
-            for result, true_mean in zip(results, true_means, strict=True)
+            for result, true_mean in zip(
+                results,
+                parameter_means if parameter_means is not None else future_means,
+                strict=True,
+            )
             if result.interval is not None
         ]
         summaries[name] = EvaluationSummary(

@@ -16,7 +16,6 @@ Evaluate latent-demand MAE, predictive interval coverage, stockout rate, fill ra
 ## Required comparisons
 - Sales mean
 - Moving average
-- Moving average
 - Croston / TSB
 - Uncensored count model
 - Censored likelihood
@@ -29,18 +28,22 @@ Evaluate latent-demand MAE, predictive interval coverage, stockout rate, fill ra
 It reports success coverage, failure rate, MAE among successful estimates, and
 a bootstrap 90% interval for MAE. Paired model comparisons use the same cases
 and report bootstrap intervals for the MAE difference.
-The benchmark currently covers stationary Poisson and Negative Binomial
-processes, configurable demand means, intermittent-demand probability, and
-ample/mixed/severe availability profiles; it is not evidence that the
-censored model generalizes to live retail data.
+The benchmark includes a configurable 18-combination matrix across 30/90-day
+histories, low/medium/high demand, and ample/mixed/severe availability.
+It covers stationary Poisson and Negative Binomial processes, configurable
+intermittent-demand probability, and separate 14-day future demand windows;
+it is not evidence that the censored model generalizes to live retail data.
 
 The sequential inventory simulator in `research.inventory` tracks outstanding
 purchase orders, supplier lead time, purchase/holding/stockout costs, and fill
-rate. Reorder points are still supplied by the experiment, so a future phase
-must connect them to rolling forecasts and supplier policies. The
-`simulate_forecast_policy` helper provides that forecast-driven path, while
-production experiments still need calibrated safety stock and supplier
-constraints.
+rate. The `simulate_forecast_policy` helper converts model forecasts into
+reorder targets and `compare_baseline_inventory_policies` compares model-driven
+outcomes. Controlled experiments still need calibrated safety stock, supplier
+constraints, and real merchant validation.
 
 ## Limitations
-The Poisson likelihood excludes hierarchical, promotional, temporal, and uncertain-stock effects. The simulator currently supports stationary Poisson and Negative Binomial latent demand, but does not yet implement the full 30/90-day benchmark matrix, sequential inventory costs, or calibrated predictive intervals. Synthetic results must report excluded trials and uncertainty.
+The Poisson likelihood excludes hierarchical, promotional, temporal, and
+uncertain-stock effects. The current profile-likelihood interval is an
+approximate parameter interval, not a calibrated future-demand prediction
+interval. Synthetic and inventory conclusions remain demonstrations until
+independently reviewed and validated on real or reference datasets.

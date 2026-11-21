@@ -26,6 +26,10 @@ def test_tsb_reference_sequence():
     assert tsb([4, 0, 0, 6, 0, 3]).estimate == pytest.approx(3.1476792)
 
 
+def test_tsb_leading_zero_reference_sequence():
+    assert tsb([0, 0, 4, 0, 6]).estimate == pytest.approx(0.17376)
+
+
 def test_censored_baseline_reports_non_identifiability():
     result = poisson_censored([{"sales": 10, "available_stock": 10}] * 5)
     assert result.status == "insufficient_information"

@@ -48,7 +48,8 @@ def make_cases(config: BenchmarkConfig) -> tuple[list[ForecastCase], list[float]
     rng = random.Random(config.seed)
     np_rng = np.random.default_rng(config.seed)
     cases: list[ForecastCase] = []
-    true_means: list[float] = []
+    future_means: list[float] = []
+    parameter_means: list[float] = []
     for _ in range(config.trials):
         total_days = config.history_days + config.forecast_days
         if config.demand_process == "poisson":
@@ -83,14 +84,46 @@ def make_cases(config: BenchmarkConfig) -> tuple[list[ForecastCase], list[float]
                 ),
             )
         )
-        true_means.append(float(np.mean(latent[config.history_days :])))
-    return cases, true_means
+        future_means.append(float(np.mean(latent[config.history_days:])))
+        parameter_means.append(float(config.demand_mean))
+    return cases, future_means
+
+
+def make_parameter_means(config: BenchmarkConfig) -> list[float]:
+    """Return the known latent parameter mean for interval-coverage tests."""
+    if config.trials < 1:
+        raise ValueError("trials must be positive")
+    return [float(config.demand_mean)] * config.trials
 
 
 def run_benchmark(config: BenchmarkConfig) -> SuiteEvaluation:
     """Run the six-baseline benchmark and return paired summaries."""
     cases, true_means = make_cases(config)
-    return evaluate_suite(baseline_suite(), cases, true_means, config.seed)
+    return evaluate_suite(
+        baseline_suite(),
+        cases,
+        true_means,
+        config.seed,
+        parameter_means=make_parameter_means(config),
+    )
+
+
+def run_research_matrix(trials: int = 20) -> dict[str, SuiteEvaluation]:
+    """Run the default reproducible demand and availability matrix."""
+    results: dict[str, SuiteEvaluation] = {}
+    for history_days in (30, 90):
+        for demand_mean in (4.0, 16.5, 40.0):
+            for availability in ("ample", "mixed", "severe"):
+                name = f"{history_days}d_mean{demand_mean:g}_{availability}"
+                results[name] = run_benchmark(
+                    BenchmarkConfig(
+                        history_days=history_days,
+                        trials=trials,
+                        demand_mean=demand_mean,
+                        availability_profile=availability,
+                    )
+                )
+    return results
 
 
 if __name__ == "__main__":

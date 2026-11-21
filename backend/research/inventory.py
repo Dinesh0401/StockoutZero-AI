@@ -6,6 +6,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from math import ceil
 
+from app.baselines import CaseBaseline, ForecastCase
+
 
 @dataclass(frozen=True)
 class InventoryCosts:
@@ -107,3 +109,31 @@ def simulate_forecast_policy(
         initial_stock=initial_stock,
         lead_time_days=lead_time_days,
     )
+
+
+def compare_baseline_inventory_policies(
+    cases: Sequence[ForecastCase],
+    baseline_names: Sequence[str],
+    baseline_suite: dict[str, CaseBaseline],
+    lead_time_days: int = 7,
+    costs: InventoryCosts = InventoryCosts(),
+) -> dict[str, InventorySimulation]:
+    """Generate each baseline's forecast and simulate its replenishment outcome."""
+    comparisons: dict[str, InventorySimulation] = {}
+    for name in baseline_names:
+        baseline = baseline_suite[name]
+        for case in cases:
+            estimate = baseline(case)
+            if estimate.status != "estimated" or estimate.estimate is None:
+                continue
+            demand = list(case.future_demand)
+            daily_forecast = [estimate.estimate] * len(demand)
+            comparisons[name] = simulate_forecast_policy(
+                demand,
+                daily_forecast,
+                lead_time_days,
+                costs=costs,
+                initial_stock=0,
+            )
+            break
+    return comparisons

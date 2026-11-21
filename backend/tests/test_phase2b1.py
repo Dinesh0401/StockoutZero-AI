@@ -1,7 +1,11 @@
 from app.baselines import ForecastCase, baseline_suite
-from research.benchmark import BenchmarkConfig, make_cases
+from research.benchmark import BenchmarkConfig, make_cases, run_research_matrix
 from research.evaluation import evaluate_suite, paired_mae_difference
-from research.inventory import simulate_forecast_policy, simulate_inventory
+from research.inventory import (
+    compare_baseline_inventory_policies,
+    simulate_forecast_policy,
+    simulate_inventory,
+)
 
 
 def test_all_six_baselines_share_one_interface():
@@ -78,6 +82,16 @@ def test_forecast_policy_drives_reorder_points():
     assert result.fulfilled_units > 0
 
 
+def test_inventory_policy_comparison_is_model_driven():
+    cases, _ = make_cases(BenchmarkConfig(history_days=30, trials=3))
+    comparisons = compare_baseline_inventory_policies(
+        cases,
+        ["sales_mean", "moving_average", "croston", "tsb", "poisson_uncensored", "poisson_censored"],
+        baseline_suite(),
+    )
+    assert set(comparisons).issubset(baseline_suite())
+
+
 def test_benchmark_supports_demand_and_availability_regimes():
     cases, means = make_cases(
         BenchmarkConfig(
@@ -90,3 +104,9 @@ def test_benchmark_supports_demand_and_availability_regimes():
     )
     assert len(cases) == len(means) == 3
     assert any(value == 0 for value in cases[0].sales)
+
+
+def test_research_matrix_has_default_combinations():
+    matrix = run_research_matrix(trials=2)
+    assert len(matrix) == 18
+    assert all(summary.trials == 2 for result in matrix.values() for summary in result.summaries.values())
