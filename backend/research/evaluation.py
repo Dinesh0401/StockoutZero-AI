@@ -100,15 +100,17 @@ def evaluate_suite(
             if result.status == "estimated" and result.estimate is not None:
                 errors.append(abs(result.estimate - true_mean))
         trials = len(cases)
-        interval_hits = [
-            result.interval[0] <= true_mean <= result.interval[1]
-            for result, true_mean in zip(
-                results,
-                parameter_means if parameter_means is not None else future_means,
-                strict=True,
-            )
-            if result.interval is not None
-        ]
+        interval_hits: list[bool] = []
+        if parameter_means is not None:
+            interval_hits = [
+                result.interval[0] <= true_mean <= result.interval[1]
+                for result, true_mean in zip(
+                    results,
+                    parameter_means,
+                    strict=True,
+                )
+                if result.interval is not None
+            ]
         summaries[name] = EvaluationSummary(
             name=name,
             trials=trials,
@@ -150,4 +152,18 @@ def paired_mae_difference(
     return (
         sum(differences) / len(differences) if differences else None,
         _bootstrap_interval(differences, seed),
+    )
+
+
+def paired_bootstrap_mean(
+    values: Sequence[float],
+    seed: int = 42,
+    samples: int = 1000,
+) -> tuple[float | None, tuple[float, float] | None]:
+    """Calculate a bootstrap mean and interval for one paired metric."""
+    if not values:
+        return None, None
+    return (
+        sum(values) / len(values),
+        _bootstrap_interval(values, seed, samples),
     )

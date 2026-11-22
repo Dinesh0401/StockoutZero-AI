@@ -1,8 +1,14 @@
 from app.baselines import ForecastCase, baseline_suite
-from research.benchmark import BenchmarkConfig, make_cases, run_research_matrix
+from research.benchmark import (
+    BenchmarkConfig,
+    make_cases,
+    make_parameter_means,
+    run_research_matrix,
+)
 from research.evaluation import evaluate_suite, paired_mae_difference
 from research.inventory import (
     compare_baseline_inventory_policies,
+    compare_rolling_baseline_policies,
     simulate_forecast_policy,
     simulate_inventory,
 )
@@ -115,9 +121,44 @@ def test_benchmark_supports_demand_and_availability_regimes():
 
 def test_research_matrix_has_default_combinations():
     matrix = run_research_matrix(trials=2)
-    assert len(matrix) == 18
+    assert len(matrix) == 72
     assert all(
         summary.trials == 2
         for result in matrix.values()
         for summary in result.summaries.values()
     )
+
+
+def test_rolling_comparison_preserves_every_trial():
+    cases, _ = make_cases(BenchmarkConfig(history_days=30, trials=3))
+    comparisons = compare_rolling_baseline_policies(
+        cases,
+        ["sales_mean", "croston", "poisson_censored"],
+        baseline_suite(),
+        lead_time_days=2,
+        case_pack=6,
+    )
+    assert set(comparisons) == {"sales_mean", "croston", "poisson_censored"}
+    assert all(len(comparison.outcomes) == 3 for comparison in comparisons.values())
+
+
+def test_parameter_coverage_does_not_fallback_to_future_means():
+    cases, future_means = make_cases(BenchmarkConfig(history_days=30, trials=3))
+    result = evaluate_suite(
+        {"poisson_censored": baseline_suite()["poisson_censored"]},
+        cases,
+        future_means,
+        parameter_means=None,
+    )
+    coverage = result.summaries["poisson_censored"].interval_coverage
+    assert coverage is None
+
+
+def test_intermittent_parameter_mean_is_unconditional():
+    config = BenchmarkConfig(
+        history_days=30,
+        trials=3,
+        demand_mean=8,
+        intermittent_probability=0.5,
+    )
+    assert make_parameter_means(config) == [4.0, 4.0, 4.0]

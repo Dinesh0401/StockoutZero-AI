@@ -29,6 +29,34 @@ class InventorySimulation:
     orders: int
 
 
+@dataclass(frozen=True)
+class RollingPolicyOutcome:
+    """One trial-level rolling inventory result and forecast status."""
+
+    trial: int
+    simulation: InventorySimulation
+    forecasts: tuple[float, ...]
+    abstentions: int
+
+
+@dataclass(frozen=True)
+class RollingPolicyComparison:
+    """Paired rolling outcomes for one baseline."""
+
+    name: str
+    outcomes: tuple[RollingPolicyOutcome, ...]
+
+
+@dataclass(frozen=True)
+class PairedPolicyMetric:
+    """Paired cost or service differences against a reference policy."""
+
+    reference: str
+    baseline: str
+    mean_difference: float
+    paired_trials: int
+
+
 def simulate_inventory(
     demand: Sequence[int],
     reorder_points: Sequence[int],
@@ -137,3 +165,138 @@ def compare_baseline_inventory_policies(
             )
             break
     return comparisons
+
+
+def compare_rolling_baseline_policies(
+    cases: Sequence[ForecastCase],
+    baseline_names: Sequence[str],
+    baseline_suite: dict[str, CaseBaseline],
+    lead_time_days: int = 7,
+    case_pack: int = 1,
+    costs: InventoryCosts = InventoryCosts(),
+) -> dict[str, RollingPolicyComparison]:
+    """Run every model on every trial with rolling, decision-time forecasts."""
+    if lead_time_days < 0:
+        raise ValueError("Lead time cannot be negative")
+    if case_pack < 1:
+        raise ValueError("Case pack must be at least 1")
+
+    comparisons: dict[str, RollingPolicyComparison] = {}
+    for name in baseline_names:
+        baseline = baseline_suite[name]
+        trial_outcomes: list[RollingPolicyOutcome] = []
+        for trial, case in enumerate(cases):
+            sales_history = list(case.sales)
+            stock_history = list(case.observations)
+            stock = 0
+            arrivals: dict[int, int] = {}
+            forecasts: list[float] = []
+            abstentions = 0
+            total_cost = 0.0
+            stockout_units = 0
+            fulfilled_units = 0
+            orders = 0
+
+            for day, latent_demand in enumerate(case.future_demand):
+                stock += arrivals.pop(day, 0)
+                rolling_case = ForecastCase(
+                    sales=tuple(sales_history),
+                    observations=tuple(stock_history),
+                    future_demand=case.future_demand[day:],
+                    future_availability=case.future_availability[day:],
+                )
+                estimate = baseline(rolling_case)
+                if estimate.status == "estimated" and estimate.estimate is not None:
+                    forecast = max(0.0, estimate.estimate)
+                else:
+                    forecast = 0.0
+                    abstentions += 1
+
+                forecasts.append(forecast)
+                inventory_position = stock + sum(
+                    quantity
+                    for arrival_day, quantity in arrivals.items()
+                    if arrival_day > day
+                )
+                target = ceil(forecast * lead_time_days / case_pack) * case_pack
+                raw_order = max(target - inventory_position, 0)
+                if raw_order:
+                    orders += 1
+                    total_cost += raw_order * costs.purchase
+                    if lead_time_days == 0:
+                        stock += raw_order
+                    else:
+                        arrivals[day + lead_time_days] = (
+                            arrivals.get(day + lead_time_days, 0) + raw_order
+                        )
+
+                fulfilled = min(stock, latent_demand)
+                lost = latent_demand - fulfilled
+                stock -= fulfilled
+                fulfilled_units += fulfilled
+                stockout_units += lost
+                total_cost += stock * costs.holding + lost * costs.stockout
+
+                available_before_demand = stock + fulfilled
+                sales_history.append(fulfilled)
+                stock_history.append(
+                    {
+                        "sales": fulfilled,
+                        "available_stock": available_before_demand,
+                    }
+                )
+
+            total_demand = fulfilled_units + stockout_units
+            simulation = InventorySimulation(
+                total_cost=total_cost,
+                stockout_units=stockout_units,
+                fulfilled_units=fulfilled_units,
+                fill_rate=(fulfilled_units / total_demand if total_demand else 1.0),
+                orders=orders,
+            )
+            trial_outcomes.append(
+                RollingPolicyOutcome(
+                    trial=trial,
+                    simulation=simulation,
+                    forecasts=tuple(forecasts),
+                    abstentions=abstentions,
+                )
+            )
+        comparisons[name] = RollingPolicyComparison(
+            name=name,
+            outcomes=tuple(trial_outcomes),
+        )
+    return comparisons
+
+
+def paired_policy_cost_differences(
+    comparisons: dict[str, RollingPolicyComparison],
+    reference: str,
+) -> list[PairedPolicyMetric]:
+    """Report baseline-minus-reference paired total-cost differences."""
+    if reference not in comparisons:
+        raise ValueError("Reference policy was not evaluated")
+    reference_outcomes = {
+        outcome.trial: outcome for outcome in comparisons[reference].outcomes
+    }
+    metrics: list[PairedPolicyMetric] = []
+    for name, comparison in comparisons.items():
+        if name == reference:
+            continue
+        differences = [
+            outcome.simulation.total_cost
+            - reference_outcomes[outcome.trial].simulation.total_cost
+            for outcome in comparison.outcomes
+            if outcome.trial in reference_outcomes
+        ]
+        metrics.append(
+            PairedPolicyMetric(
+                reference=reference,
+                baseline=name,
+                mean_difference=(
+                    sum(differences) / len(differences) if differences else 0.0
+                ),
+                paired_trials=len(differences),
+            )
+        )
+    return metrics

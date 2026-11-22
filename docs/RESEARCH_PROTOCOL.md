@@ -28,10 +28,11 @@ Evaluate latent-demand MAE, predictive interval coverage, stockout rate, fill ra
 It reports success coverage, failure rate, MAE among successful estimates, and
 a bootstrap 90% interval for MAE. Paired model comparisons use the same cases
 and report bootstrap intervals for the MAE difference.
-The benchmark includes a configurable 18-combination matrix across 30/90-day
-histories, low/medium/high demand, and ample/mixed/severe availability.
-It covers stationary Poisson and Negative Binomial processes, configurable
-intermittent-demand probability, and separate 14-day future demand windows;
+The benchmark includes a configurable matrix across 30/90-day histories,
+Poisson/Negative Binomial demand, low/medium/high demand, intermittent/non-
+intermittent demand, and ample/mixed/severe availability. The smoke matrix
+covers 72 configurations for one seed. Larger reporting runs use more trials
+and independent seeds. It uses separate 14-day future demand windows;
 it is not evidence that the censored model generalizes to live retail data.
 
 The sequential inventory simulator in `research.inventory` tracks outstanding

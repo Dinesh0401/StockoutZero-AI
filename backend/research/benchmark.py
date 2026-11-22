@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import random
 from dataclasses import dataclass
 from importlib import import_module
+from pathlib import Path
 
 from app.baselines import ForecastCase, baseline_suite
 
@@ -49,7 +51,6 @@ def make_cases(config: BenchmarkConfig) -> tuple[list[ForecastCase], list[float]
     np_rng = np.random.default_rng(config.seed)
     cases: list[ForecastCase] = []
     future_means: list[float] = []
-    parameter_means: list[float] = []
     for _ in range(config.trials):
         total_days = config.history_days + config.forecast_days
         if config.demand_process == "poisson":
@@ -70,6 +71,11 @@ def make_cases(config: BenchmarkConfig) -> tuple[list[ForecastCase], list[float]
             ]
         observations: list[dict[str, int | None]] = []
         sales_history: list[int] = []
+        future_availability: list[int] = []
+        for _ in latent[config.history_days :]:
+            future_availability.append(
+                rng.choice(availability[config.availability_profile])
+            )
         for demand in latent[: config.history_days]:
             available = rng.choice(availability[config.availability_profile])
             sales = min(int(demand), available)
@@ -82,18 +88,22 @@ def make_cases(config: BenchmarkConfig) -> tuple[list[ForecastCase], list[float]
                 future_demand=tuple(
                     int(value) for value in latent[config.history_days :]
                 ),
+                future_availability=tuple(future_availability),
             )
         )
         future_means.append(float(np.mean(latent[config.history_days :])))
-        parameter_means.append(float(config.demand_mean))
     return cases, future_means
 
 
-def make_parameter_means(config: BenchmarkConfig) -> list[float]:
+def make_parameter_means(config: BenchmarkConfig) -> list[float] | None:
     """Return the known latent parameter mean for interval-coverage tests."""
     if config.trials < 1:
         raise ValueError("trials must be positive")
-    return [float(config.demand_mean)] * config.trials
+    if config.demand_process != "poisson":
+        return None
+    return [
+        float(config.demand_mean * (1 - config.intermittent_probability))
+    ] * config.trials
 
 
 def run_benchmark(config: BenchmarkConfig) -> SuiteEvaluation:
@@ -108,22 +118,64 @@ def run_benchmark(config: BenchmarkConfig) -> SuiteEvaluation:
     )
 
 
-def run_research_matrix(trials: int = 20) -> dict[str, SuiteEvaluation]:
+def run_research_matrix(
+    trials: int = 20,
+    seeds: tuple[int, ...] = (42,),
+) -> dict[str, SuiteEvaluation]:
     """Run the default reproducible demand and availability matrix."""
     results: dict[str, SuiteEvaluation] = {}
-    for history_days in (30, 90):
-        for demand_mean in (4.0, 16.5, 40.0):
-            for availability in ("ample", "mixed", "severe"):
-                name = f"{history_days}d_mean{demand_mean:g}_{availability}"
-                results[name] = run_benchmark(
-                    BenchmarkConfig(
-                        history_days=history_days,
-                        trials=trials,
-                        demand_mean=demand_mean,
-                        availability_profile=availability,
-                    )
-                )
+    for seed in seeds:
+        for history_days in (30, 90):
+            for demand_process in ("poisson", "negative_binomial"):
+                for demand_mean in (4.0, 16.5, 40.0):
+                    for intermittent_probability in (0.0, 0.5):
+                        for availability in ("ample", "mixed", "severe"):
+                            name = (
+                                f"seed{seed}_{history_days}d_{demand_process}"
+                                f"_mean{demand_mean:g}"
+                                f"_int{intermittent_probability:g}_{availability}"
+                            )
+                            results[name] = run_benchmark(
+                                BenchmarkConfig(
+                                    history_days=history_days,
+                                    forecast_days=14,
+                                    trials=trials,
+                                    seed=seed,
+                                    demand_process=demand_process,
+                                    demand_mean=demand_mean,
+                                    intermittent_probability=intermittent_probability,
+                                    availability_profile=availability,
+                                )
+                            )
     return results
+
+
+def save_matrix_results(
+    results: dict[str, SuiteEvaluation],
+    path: str | Path,
+) -> None:
+    """Save benchmark summaries in reproducible machine-readable JSON."""
+    serializable = {
+        name: {
+            summary_name: {
+                "name": summary.name,
+                "trials": summary.trials,
+                "successful_trials": summary.successful_trials,
+                "failure_rate": summary.failure_rate,
+                "mae": summary.mae,
+                "bootstrap_mae_interval_90": summary.bootstrap_mae_interval_90,
+                "interval_coverage": summary.interval_coverage,
+            }
+            for summary_name, summary in result.summaries.items()
+        }
+        for name, result in results.items()
+    }
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        json.dumps(serializable, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":
