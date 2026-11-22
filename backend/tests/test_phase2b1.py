@@ -101,6 +101,83 @@ def test_forecast_policy_rounds_order_quantity_to_case_pack():
     assert result.purchased_units % 6 == 0
 
 
+def test_exact_case_pack_order_scenario():
+    result = simulate_forecast_policy(
+        demand=[0],
+        daily_forecast=[12],
+        lead_time_days=1,
+        initial_stock=5,
+        case_pack=6,
+    )
+    assert result.purchased_units == 12
+
+
+def test_inventory_orders_only_whole_case_packs():
+    result = simulate_inventory(
+        demand=[0],
+        reorder_points=[12],
+        initial_stock=5,
+        lead_time_days=1,
+        case_pack=6,
+    )
+    assert result.purchased_units == 12
+
+
+def test_zero_shortage_places_no_order():
+    result = simulate_inventory(
+        demand=[0],
+        reorder_points=[5],
+        initial_stock=5,
+        case_pack=6,
+    )
+    assert result.purchased_units == 0
+    assert result.orders == 0
+
+
+def test_inventory_position_above_target_places_no_order():
+    result = simulate_inventory(
+        demand=[0],
+        reorder_points=[4],
+        initial_stock=11,
+        lead_time_days=2,
+        case_pack=6,
+    )
+    assert result.purchased_units == 0
+    assert result.orders == 0
+
+
+def test_invalid_case_pack_is_rejected():
+    try:
+        simulate_inventory([0], [12], case_pack=0)
+    except ValueError as exc:
+        assert "case pack" in str(exc).lower()
+    else:
+        raise AssertionError("Invalid case pack must raise ValueError")
+
+
+def test_initial_inventory_can_be_not_divisible_by_case_pack():
+    result = simulate_inventory(
+        demand=[0],
+        reorder_points=[12],
+        initial_stock=5,
+        lead_time_days=0,
+        case_pack=6,
+    )
+    assert result.purchased_units == 12
+    assert result.purchased_units % 6 == 0
+
+
+def test_outstanding_order_is_included_in_inventory_position():
+    result = simulate_inventory(
+        demand=[0, 0],
+        reorder_points=[12, 12],
+        initial_stock=0,
+        lead_time_days=2,
+        case_pack=6,
+    )
+    assert result.purchased_units == 12
+
+
 def test_history_only_rolling_object_is_used():
     cases, _ = make_cases(BenchmarkConfig(history_days=30, trials=2))
 

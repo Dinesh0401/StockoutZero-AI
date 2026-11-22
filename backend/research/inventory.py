@@ -190,6 +190,7 @@ def compare_baseline_inventory_policies(
                     lead_time_days,
                     costs=costs,
                     initial_stock=0,
+                    case_pack=case_pack,
                 )
             )
         if simulations:
