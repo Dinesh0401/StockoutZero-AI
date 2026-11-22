@@ -32,8 +32,11 @@ log(mu[i,t,s]) =
 Observed sales follow:
 
 ```text
-S[i,t,s] = min(D[i,t,s], A[i,t,s])
+S[i,t,s] = min(D[i,t,s], A_available[i,t,s])
 ```
+
+`A_available` explicitly means stock that is sellable immediately before
+customer demand occurs, not end-of-day inventory.
 
 The first implementation will use the tractable censored-likelihood form:
 
@@ -67,21 +70,37 @@ produce explicit abstention states.
 
 ### State model
 
-Actual sellable inventory will be a latent count bounded by ledger, returns,
-shrinkage, and supplier arrivals:
+Actual sellable inventory will be a latent count. The design separates
+inventory states and event timestamps:
 
 ```text
-A[i,t,s] = clamp(
-    ledger_opening
-  + receipts
-  - sales
-  - shrinkage
-  - expiry
-  + returns,
-    0,
-    maximum_case_count
-)
+B[i,t,s] = beginning-of-day recorded sellable inventory
+R[i,t,s] = supplier receipts with arrival times <= demand time
+P[i,t,s] = purchases already received but not yet reflected in the ledger
+E[i,t,s] = stock expired or otherwise unusable during the day
+X[i,t,s] = shrinkage, damage, or unexplained loss
+T[i,t,s] = confirmed returns entering sellable stock
+U[i,t,s] = audit correction applied to the state
+
+A_before_demand[i,t,s] =
+    clamp(B[i,t,s] + R[i,t,s] + P[i,t,s] + T[i,t,s] + U[i,t,s] - E[i,t,s] - X[i,t,s],
+          0,
+          maximum_case_count)
+
+S[i,t,s] = min(D[i,t,s], A_before_demand[i,t,s])
+A_end[i,t,s] = A_before_demand[i,t,s] - S[i,t,s]
 ```
+
+The forecast decision is made before demand and uses only:
+
+- Beginning-of-day inventory.
+- Receipts known before the decision timestamp.
+- Outstanding purchase orders.
+- Historical sales, stock events, and audits.
+
+Actual demand, same-day post-demand stock, and later audit observations must
+not enter the decision-time forecast. Lost demand is not inferred from end-day
+sales unless a stockout censoring model is explicit.
 
 The first state representation will use an audited-or-inferred availability
 distribution rather than inventing exact stock quantities.
