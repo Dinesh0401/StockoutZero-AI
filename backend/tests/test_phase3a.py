@@ -1,7 +1,6 @@
 import math
 
 import pytest
-
 from research.hierarchical_demand import (
     CensoredDemandObservation,
     HierarchicalDemandConfig,
@@ -41,9 +40,7 @@ def test_partial_pooling_shrinks_effects_toward_zero():
 
 
 def test_all_censored_history_abstains():
-    rows = tuple(
-        CensoredDemandObservation("store", "product", 5, 5) for _ in range(8)
-    )
+    rows = tuple(CensoredDemandObservation("store", "product", 5, 5) for _ in range(8))
     result = fit_hierarchical_censored_demand(rows)
     assert result.status == "insufficient_information"
     assert result.predict_mean("store", "product") is None

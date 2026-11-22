@@ -9,12 +9,15 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from importlib import import_module
 from math import exp, isfinite, log, log1p
+from typing import Any
 
-import numpy as np
 from scipy.optimize import minimize
 from scipy.special import gammaln
 from scipy.stats import nbinom
+
+np = import_module("numpy")
 
 
 @dataclass(frozen=True)
@@ -73,9 +76,7 @@ class SyntheticDemandDataset:
     true_product_effects: dict[str, float]
 
 
-def _negative_binomial_logpmf(
-    demand: int, mean: float, dispersion: float
-) -> float:
+def _negative_binomial_logpmf(demand: int, mean: float, dispersion: float) -> float:
     """Return NB2 log-PMF using mean and size (dispersion) parameters."""
     probability = dispersion / (dispersion + mean)
     return float(
@@ -87,9 +88,7 @@ def _negative_binomial_logpmf(
     )
 
 
-def _negative_binomial_logsf(
-    lower_bound: int, mean: float, dispersion: float
-) -> float:
+def _negative_binomial_logsf(lower_bound: int, mean: float, dispersion: float) -> float:
     """Return log P(D >= lower_bound) for a censored NB2 observation."""
     if lower_bound <= 0:
         return 0.0
@@ -121,9 +120,7 @@ def censored_negative_binomial_log_likelihood(
         if observation.sales < 0 or observation.sales > available:
             raise ValueError("Sales must be between zero and available stock")
         if observation.sales < available:
-            total += _negative_binomial_logpmf(
-                observation.sales, mean, dispersion
-            )
+            total += _negative_binomial_logpmf(observation.sales, mean, dispersion)
         else:
             total += _negative_binomial_logsf(available, mean, dispersion)
     return total
@@ -161,7 +158,11 @@ def fit_hierarchical_censored_demand(
             0,
             "No positive-stock observations were supplied.",
         )
-    uncensored = [row for row in usable if row.sales < row.available_stock]
+    uncensored = []
+    for row in usable:
+        available = row.available_stock
+        if available is not None and row.sales < available:
+            uncensored.append(row)
     if not uncensored:
         return HierarchicalDemandFit(
             "insufficient_information",
@@ -185,7 +186,7 @@ def fit_hierarchical_censored_demand(
     initial = np.zeros(1 + len(stores) + len(products), dtype=float)
     initial[0] = log(sales_mean)
 
-    def unpack(parameters: np.ndarray) -> tuple[float, np.ndarray, np.ndarray]:
+    def unpack(parameters: Any) -> tuple[float, Any, Any]:
         store_effects = parameters[1 : 1 + len(stores)]
         product_effects = parameters[1 + len(stores) :]
         return (
@@ -194,7 +195,7 @@ def fit_hierarchical_censored_demand(
             product_effects - np.mean(product_effects),
         )
 
-    def objective(parameters: np.ndarray) -> float:
+    def objective(parameters: Any) -> float:
         intercept, store_effects, product_effects = unpack(parameters)
         means = [
             exp(
@@ -207,11 +208,10 @@ def fit_hierarchical_censored_demand(
         likelihood = censored_negative_binomial_log_likelihood(
             usable, means, config.dispersion
         )
-        penalty = (
-            sum(value * value for value in store_effects)
-            / (2 * config.store_prior_scale**2)
-            + sum(value * value for value in product_effects)
-            / (2 * config.product_prior_scale**2)
+        penalty = sum(value * value for value in store_effects) / (
+            2 * config.store_prior_scale**2
+        ) + sum(value * value for value in product_effects) / (
+            2 * config.product_prior_scale**2
         )
         return -likelihood + penalty
 
@@ -236,9 +236,7 @@ def fit_hierarchical_censored_demand(
     return HierarchicalDemandFit(
         "estimated",
         intercept,
-        {
-            store: float(store_effects[index]) for index, store in enumerate(stores)
-        },
+        {store: float(store_effects[index]) for index, store in enumerate(stores)},
         {
             product: float(product_effects[index])
             for index, product in enumerate(products)
