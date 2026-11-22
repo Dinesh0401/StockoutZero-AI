@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from math import exp, isfinite, log
+from math import exp, isfinite, log, log1p
 
 import numpy as np
 from scipy.optimize import minimize

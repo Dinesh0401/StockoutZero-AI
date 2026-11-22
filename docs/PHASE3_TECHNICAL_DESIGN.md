@@ -3,8 +3,26 @@
 ## Status
 
 Phase 3 is a research milestone. It must not be implemented as a production
-forecast until Phase 2 evidence and review are complete. The implementation
-starts only after Draft Pull Request #3 is merged.
+forecast until Phase 2 evidence and review are complete. Draft Pull Request #3
+is merged, and Phase 3A now contains the first research-only implementation.
+
+## Phase 3A implementation boundary
+
+`backend/research/hierarchical_demand.py` implements the initial NumPy/SciPy
+MAP baseline with a Negative Binomial (NB2) mean/dispersion parameterization.
+Store and product effects are centered and regularized for partial pooling.
+Only historical observations with known positive beginning-of-demand
+availability enter the likelihood:
+
+- `S < A`: Negative Binomial probability mass at observed sales.
+- `S = A > 0`: Negative Binomial survival probability at the stock boundary.
+- `A = 0` or unknown: excluded and reported, never interpreted as zero demand.
+
+The fit returns an explicit `insufficient_information` state for all-censored
+histories and `fit_failed` for non-finite or unsuccessful optimization. This
+baseline does not infer uncertain stock, perform audits, or expose a production
+API. Synthetic data and tests are provided for reproducibility and comparison
+work; hidden latent demand remains evaluator-only.
 
 ## Research question
 
