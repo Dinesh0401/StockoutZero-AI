@@ -68,6 +68,7 @@ def simulate_inventory(
     costs: InventoryCosts = InventoryCosts(),
     initial_stock: int = 0,
     lead_time_days: int = 0,
+    case_pack: int = 1,
 ) -> InventorySimulation:
     """Simulate daily replenishment decisions with outstanding purchase orders."""
     if len(demand) != len(reorder_points):
@@ -76,6 +77,8 @@ def simulate_inventory(
         raise ValueError("Initial stock cannot be negative")
     if lead_time_days < 0:
         raise ValueError("Lead time cannot be negative")
+    if case_pack < 1:
+        raise ValueError("Case pack must be at least 1")
 
     stock = initial_stock
     arrivals: dict[int, int] = {}
@@ -94,7 +97,8 @@ def simulate_inventory(
             quantity for arrival_day, quantity in arrivals.items() if arrival_day > day
         )
         if inventory_position < reorder_point:
-            ordered = reorder_point - inventory_position
+            shortage = reorder_point - inventory_position
+            ordered = ceil(shortage / case_pack) * case_pack
             purchased_units += ordered
             if lead_time_days == 0:
                 stock += ordered
@@ -150,6 +154,7 @@ def simulate_forecast_policy(
         costs=costs,
         initial_stock=initial_stock,
         lead_time_days=lead_time_days,
+        case_pack=case_pack,
     )
 
 
@@ -159,6 +164,7 @@ def compare_baseline_inventory_policies(
     baseline_suite: dict[str, CaseBaseline],
     lead_time_days: int = 7,
     costs: InventoryCosts = InventoryCosts(),
+    case_pack: int = 1,
 ) -> dict[str, InventorySimulation]:
     """Generate each baseline's forecast and simulate its replenishment outcome."""
     warnings.warn(
