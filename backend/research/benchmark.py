@@ -84,7 +84,7 @@ def make_cases(config: BenchmarkConfig) -> tuple[list[ForecastCase], list[float]
                 ),
             )
         )
-        future_means.append(float(np.mean(latent[config.history_days:])))
+        future_means.append(float(np.mean(latent[config.history_days :])))
         parameter_means.append(float(config.demand_mean))
     return cases, future_means
 

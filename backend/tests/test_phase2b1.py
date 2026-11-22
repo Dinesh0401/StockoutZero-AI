@@ -86,7 +86,14 @@ def test_inventory_policy_comparison_is_model_driven():
     cases, _ = make_cases(BenchmarkConfig(history_days=30, trials=3))
     comparisons = compare_baseline_inventory_policies(
         cases,
-        ["sales_mean", "moving_average", "croston", "tsb", "poisson_uncensored", "poisson_censored"],
+        [
+            "sales_mean",
+            "moving_average",
+            "croston",
+            "tsb",
+            "poisson_uncensored",
+            "poisson_censored",
+        ],
         baseline_suite(),
     )
     assert set(comparisons).issubset(baseline_suite())
@@ -109,4 +116,8 @@ def test_benchmark_supports_demand_and_availability_regimes():
 def test_research_matrix_has_default_combinations():
     matrix = run_research_matrix(trials=2)
     assert len(matrix) == 18
-    assert all(summary.trials == 2 for result in matrix.values() for summary in result.summaries.values())
+    assert all(
+        summary.trials == 2
+        for result in matrix.values()
+        for summary in result.summaries.values()
+    )
