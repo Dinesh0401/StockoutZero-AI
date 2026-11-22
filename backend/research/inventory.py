@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import random
+import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
 from math import ceil
@@ -27,6 +29,7 @@ class InventorySimulation:
     fulfilled_units: int
     fill_rate: float
     orders: int
+    purchased_units: int = 0
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,7 @@ class RollingPolicyOutcome:
     simulation: InventorySimulation
     forecasts: tuple[float, ...]
     abstentions: int
+    fallback_usage: int
 
 
 @dataclass(frozen=True)
@@ -55,6 +59,7 @@ class PairedPolicyMetric:
     baseline: str
     mean_difference: float
     paired_trials: int
+    bootstrap_interval_90: tuple[float, float] | None
 
 
 def simulate_inventory(
@@ -78,6 +83,7 @@ def simulate_inventory(
     stockout_units = 0
     fulfilled_units = 0
     orders = 0
+    purchased_units = 0
     for day, (actual, reorder_point) in enumerate(
         zip(demand, reorder_points, strict=True)
     ):
@@ -89,6 +95,7 @@ def simulate_inventory(
         )
         if inventory_position < reorder_point:
             ordered = reorder_point - inventory_position
+            purchased_units += ordered
             if lead_time_days == 0:
                 stock += ordered
             else:
@@ -110,6 +117,7 @@ def simulate_inventory(
         fulfilled_units=fulfilled_units,
         fill_rate=fulfilled_units / total_demand if total_demand else 1.0,
         orders=orders,
+        purchased_units=purchased_units,
     )
 
 
@@ -120,14 +128,20 @@ def simulate_forecast_policy(
     safety_days: float = 0.0,
     costs: InventoryCosts = InventoryCosts(),
     initial_stock: int = 0,
+    case_pack: int = 1,
 ) -> InventorySimulation:
     """Convert rolling forecasts into lead-time reorder points and simulate them."""
     if len(demand) != len(daily_forecast):
         raise ValueError("Demand and forecasts must have equal lengths")
     if lead_time_days < 0 or safety_days < 0:
         raise ValueError("Lead time and safety days cannot be negative")
+    if case_pack < 1:
+        raise ValueError("Case pack must be at least 1")
     reorder_points = [
-        ceil(max(0.0, forecast) * (lead_time_days + safety_days))
+        (
+            ceil(max(0.0, forecast) * (lead_time_days + safety_days) / case_pack)
+            * case_pack
+        )
         for forecast in daily_forecast
     ]
     return simulate_inventory(
@@ -147,23 +161,41 @@ def compare_baseline_inventory_policies(
     costs: InventoryCosts = InventoryCosts(),
 ) -> dict[str, InventorySimulation]:
     """Generate each baseline's forecast and simulate its replenishment outcome."""
+    warnings.warn(
+        "compare_baseline_inventory_policies is deprecated; use "
+        "compare_rolling_baseline_policies for paired trial-level results.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     comparisons: dict[str, InventorySimulation] = {}
     for name in baseline_names:
         baseline = baseline_suite[name]
+        simulations: list[InventorySimulation] = []
         for case in cases:
             estimate = baseline(case)
             if estimate.status != "estimated" or estimate.estimate is None:
                 continue
             demand = list(case.future_demand)
             daily_forecast = [estimate.estimate] * len(demand)
-            comparisons[name] = simulate_forecast_policy(
-                demand,
-                daily_forecast,
-                lead_time_days,
-                costs=costs,
-                initial_stock=0,
+            simulations.append(
+                simulate_forecast_policy(
+                    demand,
+                    daily_forecast,
+                    lead_time_days,
+                    costs=costs,
+                    initial_stock=0,
+                )
             )
-            break
+        if simulations:
+            comparisons[name] = InventorySimulation(
+                total_cost=sum(value.total_cost for value in simulations)
+                / len(simulations),
+                stockout_units=sum(value.stockout_units for value in simulations),
+                fulfilled_units=sum(value.fulfilled_units for value in simulations),
+                fill_rate=sum(value.fill_rate for value in simulations)
+                / len(simulations),
+                orders=sum(value.orders for value in simulations),
+            )
     return comparisons
 
 
@@ -174,12 +206,15 @@ def compare_rolling_baseline_policies(
     lead_time_days: int = 7,
     case_pack: int = 1,
     costs: InventoryCosts = InventoryCosts(),
+    abstention_fallback: str = "zero",
 ) -> dict[str, RollingPolicyComparison]:
     """Run every model on every trial with rolling, decision-time forecasts."""
     if lead_time_days < 0:
         raise ValueError("Lead time cannot be negative")
     if case_pack < 1:
         raise ValueError("Case pack must be at least 1")
+    if abstention_fallback not in {"zero", "conservative"}:
+        raise ValueError("Unsupported abstention fallback")
 
     comparisons: dict[str, RollingPolicyComparison] = {}
     for name in baseline_names:
@@ -192,25 +227,32 @@ def compare_rolling_baseline_policies(
             arrivals: dict[int, int] = {}
             forecasts: list[float] = []
             abstentions = 0
+            fallback_usage = 0
             total_cost = 0.0
             stockout_units = 0
             fulfilled_units = 0
             orders = 0
+            purchased_units = 0
 
             for day, latent_demand in enumerate(case.future_demand):
                 stock += arrivals.pop(day, 0)
                 rolling_case = ForecastCase(
                     sales=tuple(sales_history),
                     observations=tuple(stock_history),
-                    future_demand=case.future_demand[day:],
-                    future_availability=case.future_availability[day:],
                 )
                 estimate = baseline(rolling_case)
                 if estimate.status == "estimated" and estimate.estimate is not None:
                     forecast = max(0.0, estimate.estimate)
                 else:
-                    forecast = 0.0
                     abstentions += 1
+                    fallback_usage += 1
+                    if abstention_fallback == "conservative":
+                        known_sales = [value for value in sales_history if value > 0]
+                        forecast = (
+                            sum(known_sales) / len(known_sales) if known_sales else 1.0
+                        )
+                    else:
+                        forecast = 0.0
 
                 forecasts.append(forecast)
                 inventory_position = stock + sum(
@@ -218,10 +260,14 @@ def compare_rolling_baseline_policies(
                     for arrival_day, quantity in arrivals.items()
                     if arrival_day > day
                 )
-                target = ceil(forecast * lead_time_days / case_pack) * case_pack
-                raw_order = max(target - inventory_position, 0)
+                target_inventory = (
+                    ceil(forecast * lead_time_days / case_pack) * case_pack
+                )
+                stock_gap = max(target_inventory - inventory_position, 0)
+                raw_order = ceil(stock_gap / case_pack) * case_pack
                 if raw_order:
                     orders += 1
+                    purchased_units += raw_order
                     total_cost += raw_order * costs.purchase
                     if lead_time_days == 0:
                         stock += raw_order
@@ -253,6 +299,7 @@ def compare_rolling_baseline_policies(
                 fulfilled_units=fulfilled_units,
                 fill_rate=(fulfilled_units / total_demand if total_demand else 1.0),
                 orders=orders,
+                purchased_units=purchased_units,
             )
             trial_outcomes.append(
                 RollingPolicyOutcome(
@@ -260,6 +307,7 @@ def compare_rolling_baseline_policies(
                     simulation=simulation,
                     forecasts=tuple(forecasts),
                     abstentions=abstentions,
+                    fallback_usage=fallback_usage,
                 )
             )
         comparisons[name] = RollingPolicyComparison(
@@ -289,6 +337,19 @@ def paired_policy_cost_differences(
             for outcome in comparison.outcomes
             if outcome.trial in reference_outcomes
         ]
+        differences.sort()
+        bootstrap_interval = None
+        if differences:
+            resampled_means: list[float] = []
+            rng = random.Random(42)
+            for _ in range(1000):
+                sample = [rng.choice(differences) for _ in differences]
+                resampled_means.append(sum(sample) / len(sample))
+            resampled_means.sort()
+            bootstrap_interval = (
+                resampled_means[50],
+                resampled_means[949],
+            )
         metrics.append(
             PairedPolicyMetric(
                 reference=reference,
@@ -297,6 +358,7 @@ def paired_policy_cost_differences(
                     sum(differences) / len(differences) if differences else 0.0
                 ),
                 paired_trials=len(differences),
+                bootstrap_interval_90=bootstrap_interval,
             )
         )
     return metrics

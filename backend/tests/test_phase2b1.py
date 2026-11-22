@@ -1,4 +1,4 @@
-from app.baselines import ForecastCase, baseline_suite
+from app.baselines import BaselineEstimate, ForecastCase, baseline_suite
 from research.benchmark import (
     BenchmarkConfig,
     make_cases,
@@ -9,6 +9,7 @@ from research.evaluation import evaluate_suite, paired_mae_difference
 from research.inventory import (
     compare_baseline_inventory_policies,
     compare_rolling_baseline_policies,
+    paired_policy_cost_differences,
     simulate_forecast_policy,
     simulate_inventory,
 )
@@ -88,6 +89,53 @@ def test_forecast_policy_drives_reorder_points():
     assert result.fulfilled_units > 0
 
 
+def test_forecast_policy_rounds_order_quantity_to_case_pack():
+    result = simulate_forecast_policy(
+        demand=[5, 0],
+        daily_forecast=[12, 12],
+        lead_time_days=1,
+        initial_stock=5,
+        case_pack=6,
+    )
+    assert result.purchased_units >= 6
+    assert result.purchased_units % 6 == 0
+
+
+def test_history_only_rolling_object_is_used():
+    cases, _ = make_cases(BenchmarkConfig(history_days=30, trials=2))
+
+    def history_only(case):
+        assert case.future_demand == ()
+        assert case.future_availability == ()
+        return BaselineEstimate("history_only", 8.0)
+
+    comparisons = compare_rolling_baseline_policies(
+        cases,
+        ["history_only"],
+        {"history_only": history_only},
+        lead_time_days=2,
+        case_pack=6,
+    )
+    assert comparisons["history_only"].outcomes
+
+
+def test_rolling_abstention_reports_explicit_fallback_usage():
+    cases, _ = make_cases(BenchmarkConfig(history_days=30, trials=2))
+
+    def abstaining(case):
+        return BaselineEstimate("abstaining", None, "insufficient_information")
+
+    comparisons = compare_rolling_baseline_policies(
+        cases,
+        ["abstaining"],
+        {"abstaining": abstaining},
+        abstention_fallback="conservative",
+    )
+    outcome = comparisons["abstaining"].outcomes[0]
+    assert outcome.abstentions == len(cases[0].future_demand)
+    assert outcome.fallback_usage == outcome.abstentions
+
+
 def test_inventory_policy_comparison_is_model_driven():
     cases, _ = make_cases(BenchmarkConfig(history_days=30, trials=3))
     comparisons = compare_baseline_inventory_policies(
@@ -154,6 +202,20 @@ def test_parameter_coverage_does_not_fallback_to_future_means():
     assert coverage is None
 
 
+def test_paired_policy_costs_report_uncertainty():
+    cases, _ = make_cases(BenchmarkConfig(history_days=30, trials=3))
+    comparisons = compare_rolling_baseline_policies(
+        cases,
+        ["sales_mean", "croston"],
+        baseline_suite(),
+        lead_time_days=2,
+    )
+    metrics = paired_policy_cost_differences(comparisons, "sales_mean")
+    croston = next(metric for metric in metrics if metric.baseline == "croston")
+    assert croston.paired_trials == 3
+    assert croston.bootstrap_interval_90 is not None
+
+
 def test_intermittent_parameter_mean_is_unconditional():
     config = BenchmarkConfig(
         history_days=30,
@@ -161,4 +223,4 @@ def test_intermittent_parameter_mean_is_unconditional():
         demand_mean=8,
         intermittent_probability=0.5,
     )
-    assert make_parameter_means(config) == [4.0, 4.0, 4.0]
+    assert make_parameter_means(config) is None

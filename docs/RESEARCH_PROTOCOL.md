@@ -42,6 +42,17 @@ reorder targets and `compare_baseline_inventory_policies` compares model-driven
 outcomes. Controlled experiments still need calibrated safety stock, supplier
 constraints, and real merchant validation.
 
+### Merge-blocker safeguards
+- Order quantities are rounded to whole case packs after inventory position is
+  subtracted from the target inventory.
+- Rolling forecasters receive only historical sales and stock observations.
+  Future demand and availability remain visible only to the evaluator.
+- Abstentions use an explicit `zero` or `conservative` policy and report
+  abstention and fallback counts per trial.
+- Paired inventory-cost differences include shared-trial counts and bootstrap
+  intervals. The deprecated first-success inventory helper is retained only
+  for compatibility and must not be used for new evidence.
+
 ## Limitations
 The Poisson likelihood excludes hierarchical, promotional, temporal, and
 uncertain-stock effects. The current profile-likelihood interval is an

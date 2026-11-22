@@ -101,6 +101,8 @@ def make_parameter_means(config: BenchmarkConfig) -> list[float] | None:
         raise ValueError("trials must be positive")
     if config.demand_process != "poisson":
         return None
+    if config.intermittent_probability > 0:
+        return None
     return [
         float(config.demand_mean * (1 - config.intermittent_probability))
     ] * config.trials
