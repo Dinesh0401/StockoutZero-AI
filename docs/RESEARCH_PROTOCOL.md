@@ -16,12 +16,46 @@ Evaluate latent-demand MAE, predictive interval coverage, stockout rate, fill ra
 ## Required comparisons
 - Sales mean
 - Moving average
-- Moving average
 - Croston / TSB
 - Uncensored count model
 - Censored likelihood
 - Hierarchical censored model
 - Uncertain-availability model
 
+## Phase 2B.1 benchmark
+`python -m research.benchmark` evaluates six common baselines on identical
+30-day and 90-day training histories against a separate 14-day future window.
+It reports success coverage, failure rate, MAE among successful estimates, and
+a bootstrap 90% interval for MAE. Paired model comparisons use the same cases
+and report bootstrap intervals for the MAE difference.
+The benchmark includes a configurable matrix across 30/90-day histories,
+Poisson/Negative Binomial demand, low/medium/high demand, intermittent/non-
+intermittent demand, and ample/mixed/severe availability. The smoke matrix
+covers 72 configurations for one seed. Larger reporting runs use more trials
+and independent seeds. It uses separate 14-day future demand windows;
+it is not evidence that the censored model generalizes to live retail data.
+
+The sequential inventory simulator in `research.inventory` tracks outstanding
+purchase orders, supplier lead time, purchase/holding/stockout costs, and fill
+rate. The `simulate_forecast_policy` helper converts model forecasts into
+reorder targets and `compare_baseline_inventory_policies` compares model-driven
+outcomes. Controlled experiments still need calibrated safety stock, supplier
+constraints, and real merchant validation.
+
+### Merge-blocker safeguards
+- Order quantities are rounded to whole case packs after inventory position is
+  subtracted from the target inventory.
+- Rolling forecasters receive only historical sales and stock observations.
+  Future demand and availability remain visible only to the evaluator.
+- Abstentions use an explicit `zero` or `conservative` policy and report
+  abstention and fallback counts per trial.
+- Paired inventory-cost differences include shared-trial counts and bootstrap
+  intervals. The deprecated first-success inventory helper is retained only
+  for compatibility and must not be used for new evidence.
+
 ## Limitations
-The Poisson likelihood excludes hierarchical, promotional, temporal, and uncertain-stock effects. The simulator currently supports stationary Poisson and Negative Binomial latent demand, but does not yet implement the full 30/90-day benchmark matrix, sequential inventory costs, or calibrated predictive intervals. Synthetic results must report excluded trials and uncertainty.
+The Poisson likelihood excludes hierarchical, promotional, temporal, and
+uncertain-stock effects. The current profile-likelihood interval is an
+approximate parameter interval, not a calibrated future-demand prediction
+interval. Synthetic and inventory conclusions remain demonstrations until
+independently reviewed and validated on real or reference datasets.

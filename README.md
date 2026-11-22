@@ -22,4 +22,24 @@ cd backend
 python -m research.simulate
 ```
 
+Run the Phase 2B.1 six-baseline benchmark for 30-day and 90-day histories:
+
+```powershell
+cd backend
+python -m research.benchmark
+```
+
+Quality checks:
+
+```powershell
+python -m ruff format --check app research tests
+python -m ruff check app research tests
+python -m mypy app research
+```
+
 See [product specification](docs/PRODUCT_SPEC.md) and [research protocol](docs/RESEARCH_PROTOCOL.md).
+
+Phase 3 implementation is defined in [the technical design](docs/PHASE3_TECHNICAL_DESIGN.md). It remains a review document until Phase 2 is merged.
+
+The [Phase 2B closeout review](docs/PHASE2B_CLOSEOUT.md) lists completed
+work, verification, merge conditions, and remaining scientific limitations.

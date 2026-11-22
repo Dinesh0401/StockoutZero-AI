@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
@@ -12,7 +11,7 @@ app = FastAPI(title="StockoutZero AI", version="0.1.0")
 
 class Observation(BaseModel):
     sales: int = Field(ge=0)
-    available_stock: Optional[int] = Field(default=None, ge=0)
+    available_stock: int | None = Field(default=None, ge=0)
 
 
 class EstimateRequest(BaseModel):
@@ -26,25 +25,25 @@ class ReorderRequest(EstimateRequest):
 
 
 @app.get("/health")
-def health():
+def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
 @app.post("/estimate")
-def estimate(request: EstimateRequest):
+def estimate(request: EstimateRequest) -> dict[str, object]:
     try:
         return estimate_demand([row.model_dump() for row in request.observations])
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.post("/forecast")
-def forecast(request: EstimateRequest):
+def forecast(request: EstimateRequest) -> dict[str, object]:
     return estimate(request)
 
 
 @app.post("/recommend")
-def recommend(request: ReorderRequest):
+def recommend(request: ReorderRequest) -> dict[str, object]:
     try:
         return recommend_reorder(
             [row.model_dump() for row in request.observations],
@@ -53,10 +52,10 @@ def recommend(request: ReorderRequest):
             case_pack=request.case_pack,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/", response_class=HTMLResponse)
-def dashboard():
+def dashboard() -> HTMLResponse:
     html_path = Path(__file__).with_name("static") / "index.html"
     return HTMLResponse(html_path.read_text(encoding="utf-8"))
