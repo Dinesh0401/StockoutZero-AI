@@ -5,6 +5,7 @@ from research.hierarchical_demand import (
     CensoredDemandObservation,
     HierarchicalDemandConfig,
     censored_negative_binomial_log_likelihood,
+    evaluate_hierarchical_holdout,
     fit_hierarchical_censored_demand,
     make_synthetic_hierarchical_dataset,
 )
@@ -104,10 +105,33 @@ def test_numerical_boundaries_return_abstention_or_finite_interval():
     fit = fit_hierarchical_censored_demand(zero_rows)
     assert fit.status == "estimated"
     interval = fit.predict_mean_interval("store", "product")
-    assert interval is None or all(math.isfinite(value) and value >= 0 for value in interval)
+    assert interval is None or all(
+        math.isfinite(value) and value >= 0 for value in interval
+    )
 
     sparse_censored = tuple(
         CensoredDemandObservation("store", "product", 1, 1) for _ in range(8)
     )
     sparse_fit = fit_hierarchical_censored_demand(sparse_censored)
     assert sparse_fit.status == "insufficient_information"
+
+
+def test_held_out_evaluation_is_paired_and_reproducible():
+    dataset = make_synthetic_hierarchical_dataset(days=30, seed=19)
+    first = evaluate_hierarchical_holdout(dataset, seed=42)
+    second = evaluate_hierarchical_holdout(dataset, seed=42)
+
+    assert first == second
+    assert first.successful_pairs >= 1
+    assert first.hierarchical_mae >= 0
+    assert first.sales_mean_mae >= 0
+    assert len(first.bootstrap_mae_difference) == 2
+
+
+def test_hidden_latent_demand_is_not_used_by_fit():
+    dataset = make_synthetic_hierarchical_dataset(days=12, seed=7)
+    fit = fit_hierarchical_censored_demand(dataset.observations)
+    assert fit.status == "estimated"
+    assert dataset.latent_demand
+    for value in dataset.latent_demand:
+        assert isinstance(value, int)

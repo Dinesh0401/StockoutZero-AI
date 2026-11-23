@@ -15,8 +15,7 @@ from typing import Any
 
 from scipy.optimize import minimize
 from scipy.special import gammaln
-from scipy.stats import norm, nbinom
-from scipy.linalg import pinvh
+from scipy.stats import nbinom, norm
 
 np = import_module("numpy")
 
@@ -91,17 +90,17 @@ class HierarchicalDemandFit:
         gradient = [1.0] + [0.0] * (len(stores) + len(products))
         if store_id in stores:
             index = stores.index(store_id)
-            for position, store in enumerate(stores):
+            for position in range(len(stores)):
                 gradient[1 + position] = (
-                    (1.0 if position == index else 0.0) - 1.0 / len(stores)
-                )
+                    1.0 if position == index else 0.0
+                ) - 1.0 / len(stores)
         if product_id in products:
             index = products.index(product_id)
             offset = 1 + len(stores)
-            for position, product in enumerate(products):
+            for position in range(len(products)):
                 gradient[offset + position] = (
-                    (1.0 if position == index else 0.0) - 1.0 / len(products)
-                )
+                    1.0 if position == index else 0.0
+                ) - 1.0 / len(products)
 
         variance = sum(
             gradient[row] * self.covariance[row][column] * gradient[column]
@@ -134,6 +133,18 @@ class SyntheticDemandDataset:
     latent_demand: tuple[int, ...]
     true_store_effects: dict[str, float]
     true_product_effects: dict[str, float]
+
+
+@dataclass(frozen=True)
+class HierarchicalHoldoutSummary:
+    """Paired held-out accuracy and interval coverage for Phase 3A."""
+
+    hierarchical_mae: float
+    sales_mean_mae: float
+    paired_mae_difference: float
+    bootstrap_mae_difference: tuple[float, float]
+    interval_coverage: float | None
+    successful_pairs: int
 
 
 def _negative_binomial_logpmf(demand: int, mean: float, dispersion: float) -> float:
@@ -221,10 +232,7 @@ def fit_hierarchical_censored_demand(
             raise ValueError(
                 "Available stock must be a non-negative whole number or None"
             )
-        if (
-            row.available_stock is not None
-            and row.sales > row.available_stock
-        ):
+        if row.available_stock is not None and row.sales > row.available_stock:
             raise ValueError("Sales cannot exceed available stock")
     usable = [
         row
@@ -317,39 +325,26 @@ def fit_hierarchical_censored_demand(
             "MAP optimization did not converge to a finite solution.",
         )
     intercept, store_effects, product_effects = unpack(result.x)
-    parameters = np.asarray(result.x, dtype=float)
-    step = 1e-5
-
-    def gradient(point: Any) -> Any:
-        values = np.empty(len(point), dtype=float)
-        for index in range(len(point)):
-            upper = np.asarray(point, dtype=float).copy()
-            lower = np.asarray(point, dtype=float).copy()
-            upper[index] += step
-            lower[index] -= step
-            values[index] = (
-                objective(upper) - objective(lower)
-            ) / (2 * step)
-        return values
-
-    hessian = np.empty((len(parameters), len(parameters)), dtype=float)
-    for column in range(len(parameters)):
-        upper = parameters.copy()
-        lower = parameters.copy()
-        upper[column] += step
-        lower[column] -= step
-        column_gradient = (gradient(upper) - gradient(lower)) / (2 * step)
-        hessian[:, column] = column_gradient
-    covariance: tuple[tuple[float, ...], ...] | None
     try:
-        inverse = pinvh(hessian)
-        if np.all(np.isfinite(inverse)):
-            covariance = tuple(
-                tuple(float(value) for value in row) for row in inverse
-            )
-        else:
+        inverse = result.hess_inv.todense()
+        inverse_array = np.asarray(inverse, dtype=float)
+        if not np.all(np.isfinite(inverse_array)):
             covariance = None
-    except (np.linalg.LinAlgError, ValueError):
+        else:
+            covariance = tuple(
+                tuple(float(value) for value in row) for row in inverse_array
+            )
+    except (AttributeError, ValueError, np.linalg.LinAlgError):
+        try:
+            inverse_array = np.asarray(result.hess_inv, dtype=float)
+            covariance = (
+                tuple(tuple(float(value) for value in row) for row in inverse_array)
+                if np.all(np.isfinite(inverse_array))
+                else None
+            )
+        except (AttributeError, ValueError):
+            covariance = None
+    if covariance is not None and len(covariance) != 1 + len(stores) + len(products):
         covariance = None
     return HierarchicalDemandFit(
         "estimated",
@@ -407,4 +402,90 @@ def make_synthetic_hierarchical_dataset(
                 latent.append(demand)
     return SyntheticDemandDataset(
         tuple(observations), tuple(latent), store_effects, product_effects
+    )
+
+
+def evaluate_hierarchical_holdout(
+    dataset: SyntheticDemandDataset,
+    train_fraction: float = 0.7,
+    seed: int = 42,
+) -> HierarchicalHoldoutSummary:
+    """Compare hierarchical MAP predictions with sales mean on a deterministic split."""
+    if not 0 < train_fraction < 1:
+        raise ValueError("train_fraction must be between zero and one")
+    if len(dataset.observations) != len(dataset.latent_demand):
+        raise ValueError("Observations and latent demand must have equal lengths")
+    if not dataset.observations:
+        raise ValueError("At least one observation is required")
+
+    rng = np.random.default_rng(seed)
+    pair_count = len(dataset.observations)
+    indices = np.arange(pair_count)
+    rng.shuffle(indices)
+    train_size = max(1, int(pair_count * train_fraction))
+    train_indices = indices[:train_size]
+    test_indices = indices[train_size:]
+
+    training = tuple(dataset.observations[index] for index in train_indices)
+    fit = fit_hierarchical_censored_demand(training)
+    hierarchical_errors: list[float] = []
+    sales_errors: list[float] = []
+    differences: list[float] = []
+    interval_hits: list[bool] = []
+
+    for index in test_indices:
+        row = dataset.observations[int(index)]
+        hidden = float(dataset.latent_demand[int(index)])
+        hierarchical = fit.predict_mean(row.store_id, row.product_id)
+        sales_history = [
+            training_row.sales
+            for training_row in training
+            if training_row.store_id == row.store_id
+            and training_row.product_id == row.product_id
+        ]
+        sales_mean = sum(sales_history) / len(sales_history) if sales_history else None
+        if hierarchical is not None:
+            hierarchical_error = abs(hierarchical - hidden)
+            hierarchical_errors.append(hierarchical_error)
+        else:
+            hierarchical_error = None
+        if sales_mean is not None:
+            sales_errors.append(abs(sales_mean - hidden))
+        if hierarchical_error is not None and sales_mean is not None:
+            differences.append(hierarchical_error - abs(sales_mean - hidden))
+            interval = fit.predict_mean_interval(row.store_id, row.product_id)
+            if interval is not None:
+                interval_hits.append(interval[0] <= hidden <= interval[1])
+
+    bootstrap_values: list[float] = []
+    if differences:
+        bootstrap_rng = np.random.default_rng(seed)
+        for _ in range(1000):
+            sample = bootstrap_rng.choice(
+                np.asarray(differences), size=len(differences), replace=True
+            )
+            bootstrap_values.append(float(np.mean(sample)))
+        bootstrap_values.sort()
+        bootstrap_interval = (
+            bootstrap_values[50],
+            bootstrap_values[949],
+        )
+    else:
+        bootstrap_interval = (0.0, 0.0)
+
+    return HierarchicalHoldoutSummary(
+        hierarchical_mae=(
+            sum(hierarchical_errors) / len(hierarchical_errors)
+            if hierarchical_errors
+            else 0.0
+        ),
+        sales_mean_mae=(sum(sales_errors) / len(sales_errors) if sales_errors else 0.0),
+        paired_mae_difference=(
+            sum(differences) / len(differences) if differences else 0.0
+        ),
+        bootstrap_mae_difference=bootstrap_interval,
+        interval_coverage=(
+            sum(interval_hits) / len(interval_hits) if interval_hits else None
+        ),
+        successful_pairs=len(differences),
     )
