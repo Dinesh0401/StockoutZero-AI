@@ -10,12 +10,13 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from importlib import import_module
-from math import exp, isfinite, log, log1p
+from math import exp, isfinite, log, log1p, sqrt
 from typing import Any
 
 from scipy.optimize import minimize
 from scipy.special import gammaln
-from scipy.stats import nbinom
+from scipy.stats import norm, nbinom
+from scipy.linalg import pinvh
 
 np = import_module("numpy")
 
@@ -53,6 +54,7 @@ class HierarchicalDemandFit:
     observations_used: int
     censored_observations: int
     warning: str | None = None
+    covariance: tuple[tuple[float, ...], ...] | None = None
 
     def predict_mean(self, store_id: str, product_id: str) -> float | None:
         """Predict latent daily demand for a known or new store-product pair."""
@@ -64,6 +66,64 @@ class HierarchicalDemandFit:
             + self.product_effects.get(product_id, 0.0)
         )
         return exp(log_mean)
+
+    def predict_mean_interval(
+        self,
+        store_id: str,
+        product_id: str,
+        coverage: float = 0.90,
+    ) -> tuple[float, float] | None:
+        """Return a Laplace log-scale interval for a known or new hierarchy pair."""
+        if coverage <= 0 or coverage >= 1:
+            raise ValueError("coverage must be between zero and one")
+        if self.status != "estimated" or self.intercept is None:
+            return None
+        if self.covariance is None:
+            return None
+        stores = tuple(sorted(self.store_effects))
+        products = tuple(sorted(self.product_effects))
+        if store_id not in stores or product_id not in products:
+            return None
+        size = 1 + len(stores) + len(products)
+        if len(self.covariance) != size:
+            return None
+
+        gradient = [1.0] + [0.0] * (len(stores) + len(products))
+        if store_id in stores:
+            index = stores.index(store_id)
+            for position, store in enumerate(stores):
+                gradient[1 + position] = (
+                    (1.0 if position == index else 0.0) - 1.0 / len(stores)
+                )
+        if product_id in products:
+            index = products.index(product_id)
+            offset = 1 + len(stores)
+            for position, product in enumerate(products):
+                gradient[offset + position] = (
+                    (1.0 if position == index else 0.0) - 1.0 / len(products)
+                )
+
+        variance = sum(
+            gradient[row] * self.covariance[row][column] * gradient[column]
+            for row in range(size)
+            for column in range(size)
+        )
+        if variance < 0 or not isfinite(variance) or variance > 100.0:
+            return None
+        z_value = float(norm.ppf((1.0 + coverage) / 2.0))
+        log_mean = (
+            self.intercept
+            + self.store_effects.get(store_id, 0.0)
+            + self.product_effects.get(product_id, 0.0)
+        )
+        try:
+            lower = exp(log_mean - z_value * sqrt(variance))
+            upper = exp(log_mean + z_value * sqrt(variance))
+        except OverflowError:
+            return None
+        if not isfinite(lower) or not isfinite(upper):
+            return None
+        return (lower, upper)
 
 
 @dataclass(frozen=True)
@@ -142,6 +202,30 @@ def fit_hierarchical_censored_demand(
         raise ValueError("Prior scales must be positive")
     if config.max_iterations < 1:
         raise ValueError("max_iterations must be positive")
+    for row in observations:
+        if not isinstance(row.store_id, str) or not row.store_id.strip():
+            raise ValueError("store_id must be a non-empty string")
+        if not isinstance(row.product_id, str) or not row.product_id.strip():
+            raise ValueError("product_id must be a non-empty string")
+        if (
+            isinstance(row.sales, bool)
+            or not isinstance(row.sales, int)
+            or row.sales < 0
+        ):
+            raise ValueError("Sales must be a non-negative whole number")
+        if row.available_stock is not None and (
+            isinstance(row.available_stock, bool)
+            or not isinstance(row.available_stock, int)
+            or row.available_stock < 0
+        ):
+            raise ValueError(
+                "Available stock must be a non-negative whole number or None"
+            )
+        if (
+            row.available_stock is not None
+            and row.sales > row.available_stock
+        ):
+            raise ValueError("Sales cannot exceed available stock")
     usable = [
         row
         for row in observations
@@ -233,6 +317,40 @@ def fit_hierarchical_censored_demand(
             "MAP optimization did not converge to a finite solution.",
         )
     intercept, store_effects, product_effects = unpack(result.x)
+    parameters = np.asarray(result.x, dtype=float)
+    step = 1e-5
+
+    def gradient(point: Any) -> Any:
+        values = np.empty(len(point), dtype=float)
+        for index in range(len(point)):
+            upper = np.asarray(point, dtype=float).copy()
+            lower = np.asarray(point, dtype=float).copy()
+            upper[index] += step
+            lower[index] -= step
+            values[index] = (
+                objective(upper) - objective(lower)
+            ) / (2 * step)
+        return values
+
+    hessian = np.empty((len(parameters), len(parameters)), dtype=float)
+    for column in range(len(parameters)):
+        upper = parameters.copy()
+        lower = parameters.copy()
+        upper[column] += step
+        lower[column] -= step
+        column_gradient = (gradient(upper) - gradient(lower)) / (2 * step)
+        hessian[:, column] = column_gradient
+    covariance: tuple[tuple[float, ...], ...] | None
+    try:
+        inverse = pinvh(hessian)
+        if np.all(np.isfinite(inverse)):
+            covariance = tuple(
+                tuple(float(value) for value in row) for row in inverse
+            )
+        else:
+            covariance = None
+    except (np.linalg.LinAlgError, ValueError):
+        covariance = None
     return HierarchicalDemandFit(
         "estimated",
         intercept,
@@ -247,6 +365,7 @@ def fit_hierarchical_censored_demand(
         "Some observations were excluded because availability was unknown or zero."
         if len(usable) != len(observations)
         else None,
+        covariance,
     )
 
 

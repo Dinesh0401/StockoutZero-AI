@@ -69,3 +69,45 @@ def test_nb_likelihood_rejects_invalid_availability_and_has_finite_value():
             (3.0,),
             4.0,
         )
+
+
+@pytest.mark.parametrize(
+    ("row", "message"),
+    (
+        (
+            CensoredDemandObservation("", "product", 1, 10),
+            "store_id",
+        ),
+        (
+            CensoredDemandObservation("store", "", 1, 10),
+            "product_id",
+        ),
+        (
+            CensoredDemandObservation("store", "product", -1, 10),
+            "non-negative",
+        ),
+        (
+            CensoredDemandObservation("store", "product", 11, 10),
+            "cannot exceed",
+        ),
+    ),
+)
+def test_hierarchical_fit_rejects_invalid_observations(row, message):
+    with pytest.raises(ValueError, match=message):
+        fit_hierarchical_censored_demand((row,))
+
+
+def test_numerical_boundaries_return_abstention_or_finite_interval():
+    zero_rows = tuple(
+        CensoredDemandObservation("store", "product", 0, 10) for _ in range(12)
+    )
+    fit = fit_hierarchical_censored_demand(zero_rows)
+    assert fit.status == "estimated"
+    interval = fit.predict_mean_interval("store", "product")
+    assert interval is None or all(math.isfinite(value) and value >= 0 for value in interval)
+
+    sparse_censored = tuple(
+        CensoredDemandObservation("store", "product", 1, 1) for _ in range(8)
+    )
+    sparse_fit = fit_hierarchical_censored_demand(sparse_censored)
+    assert sparse_fit.status == "insufficient_information"
