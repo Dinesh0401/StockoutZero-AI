@@ -147,6 +147,26 @@ class HierarchicalHoldoutSummary:
     successful_pairs: int
 
 
+@dataclass(frozen=True)
+class HierarchicalValidationRun:
+    """Phase 3A evidence for one history length and seed."""
+
+    name: str
+    hierarchical_mae: float
+    baseline_maes: dict[str, float]
+    paired_difference: float
+    paired_bootstrap_interval: tuple[float, float]
+    interval_coverage: float | None
+    successful_pairs: int
+
+
+@dataclass(frozen=True)
+class HierarchicalValidationMatrix:
+    """Aggregate evidence across seeds and history lengths."""
+
+    runs: dict[str, HierarchicalValidationRun]
+
+
 def _negative_binomial_logpmf(demand: int, mean: float, dispersion: float) -> float:
     """Return NB2 log-PMF using mean and size (dispersion) parameters."""
     probability = dispersion / (dispersion + mean)
@@ -489,3 +509,57 @@ def evaluate_hierarchical_holdout(
         ),
         successful_pairs=len(differences),
     )
+
+
+def run_hierarchical_validation_matrix(
+    history_lengths: Sequence[int] = (30, 90),
+    seeds: Sequence[int] = (7, 19, 42),
+) -> dict[str, HierarchicalValidationRun]:
+    """Run reproducible held-out, pooling, and baseline validation scenarios."""
+    runs: dict[str, HierarchicalValidationRun] = {}
+    for history_days in history_lengths:
+        if history_days < 3:
+            raise ValueError("history_lengths must contain at least three days")
+        for seed in seeds:
+            dataset = make_synthetic_hierarchical_dataset(
+                days=history_days,
+                seed=seed,
+            )
+            summary = evaluate_hierarchical_holdout(dataset, seed=100 + seed)
+
+            baseline_maes: dict[str, float] = {}
+            for name, observations in (
+                ("sales_mean", dataset.observations),
+                ("moving_average", dataset.observations),
+            ):
+                sales_by_pair: dict[tuple[str, str], list[int]] = {}
+                for row in observations:
+                    sales_by_pair.setdefault((row.store_id, row.product_id), []).append(
+                        row.sales
+                    )
+                errors = [
+                    abs(
+                        (
+                            sum(sales_by_pair[(row.store_id, row.product_id)][-7:])
+                            / len(sales_by_pair[(row.store_id, row.product_id)][-7:])
+                            if name == "moving_average"
+                            else sum(sales_by_pair[(row.store_id, row.product_id)])
+                            / len(sales_by_pair[(row.store_id, row.product_id)])
+                        )
+                        - dataset.latent_demand[index]
+                    )
+                    for index, row in enumerate(dataset.observations)
+                ]
+                baseline_maes[name] = sum(errors) / len(errors)
+
+            name = f"{history_days}d_seed{seed}"
+            runs[name] = HierarchicalValidationRun(
+                name=name,
+                hierarchical_mae=summary.hierarchical_mae,
+                baseline_maes=baseline_maes,
+                paired_difference=summary.paired_mae_difference,
+                paired_bootstrap_interval=summary.bootstrap_mae_difference,
+                interval_coverage=summary.interval_coverage,
+                successful_pairs=summary.successful_pairs,
+            )
+    return runs

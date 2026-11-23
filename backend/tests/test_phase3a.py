@@ -8,6 +8,7 @@ from research.hierarchical_demand import (
     evaluate_hierarchical_holdout,
     fit_hierarchical_censored_demand,
     make_synthetic_hierarchical_dataset,
+    run_hierarchical_validation_matrix,
 )
 
 
@@ -135,3 +136,22 @@ def test_hidden_latent_demand_is_not_used_by_fit():
     assert dataset.latent_demand
     for value in dataset.latent_demand:
         assert isinstance(value, int)
+
+
+def test_validation_matrix_is_reproducible_and_has_independent_baselines():
+    first = run_hierarchical_validation_matrix(
+        history_lengths=(30,),
+        seeds=(7, 19),
+    )
+    second = run_hierarchical_validation_matrix(
+        history_lengths=(30,),
+        seeds=(7, 19),
+    )
+
+    assert first == second
+    assert set(first) == {"30d_seed7", "30d_seed19"}
+    assert all(
+        set(run.baseline_maes) == {"sales_mean", "moving_average"}
+        for run in first.values()
+    )
+    assert all(run.successful_pairs > 0 for run in first.values())

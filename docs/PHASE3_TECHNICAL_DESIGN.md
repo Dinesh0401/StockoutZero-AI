@@ -243,6 +243,9 @@ The implementation now includes:
 - Paired MAE differences and bootstrap uncertainty for the synthetic comparison.
 - Hidden latent demand retained only in evaluator datasets; fitting receives
   observed sales and known availability only.
+- A reproducible validation-matrix API reports held-out performance against
+  sales mean and moving average baselines across configured seeds and history
+  lengths, with paired bootstrap intervals and interval coverage.
 
 This work does not yet establish statistically demonstrated pooling benefit or
 predictive calibration across a full multiseed experiment matrix. Approval also
