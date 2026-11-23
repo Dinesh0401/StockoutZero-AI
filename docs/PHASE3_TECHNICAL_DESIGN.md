@@ -250,6 +250,23 @@ requires independent baselines, identifiable synthetic coverage studies, and
 real-world merchant validation. The held-out evaluator is evidence scaffolding,
 not proof of model superiority.
 
+An initial reproducible six-run synthetic matrix produced the following paired
+MAE differences (hierarchical minus sales mean) and interval coverage:
+
+| History | Seed | Hierarchical MAE | Sales mean MAE | Paired difference | 90% bootstrap interval | Coverage |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 30 days | 7 | 3.6323 | 3.3400 | +0.2923 | [-0.0025, 0.5737] | 85.19% |
+| 30 days | 19 | 3.1438 | 3.0089 | +0.1349 | [-0.0240, 0.3103] | 82.72% |
+| 30 days | 42 | 2.9094 | 3.0766 | -0.1672 | [-0.3583, 0.0243] | 92.59% |
+| 90 days | 7 | 2.7242 | 2.5661 | +0.1581 | [0.0385, 0.2627] | 88.89% |
+| 90 days | 19 | 2.8428 | 2.9248 | -0.0819 | [-0.1929, 0.0373] | 89.71% |
+| 90 days | 42 | 2.8339 | 3.0222 | -0.1884 | [-0.2974, -0.0825] | 86.83% |
+
+Negative paired differences favor the hierarchical model. The matrix is mixed:
+some intervals exclude zero favorably, some exclude zero unfavorably, and others
+cross zero. It is therefore scientific evidence for further testing, not a
+merger or production-readiness claim.
+
 ## Remaining limitations
 
 This design does not claim an original method or superiority. Prior-art review,
