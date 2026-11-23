@@ -231,6 +231,25 @@ Independent ablations remove:
 - Tests cover sparse histories, stockouts, missing updates, audit errors,
   censoring boundaries, numerical failures, and non-identifiability.
 
+## Phase 3A validation status
+
+The implementation now includes:
+
+- Strict validation for non-empty store/product identifiers, integer sales,
+  non-negative availability, and sales not exceeding availability.
+- Finite Laplace-style predictive intervals with explicit return of no interval
+  when covariance or overflow information is unreliable.
+- Deterministic held-out synthetic comparison against a sales mean baseline.
+- Paired MAE differences and bootstrap uncertainty for the synthetic comparison.
+- Hidden latent demand retained only in evaluator datasets; fitting receives
+  observed sales and known availability only.
+
+This work does not yet establish statistically demonstrated pooling benefit or
+predictive calibration across a full multiseed experiment matrix. Approval also
+requires independent baselines, identifiable synthetic coverage studies, and
+real-world merchant validation. The held-out evaluator is evidence scaffolding,
+not proof of model superiority.
+
 ## Remaining limitations
 
 This design does not claim an original method or superiority. Prior-art review,
