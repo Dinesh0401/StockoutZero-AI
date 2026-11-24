@@ -148,3 +148,166 @@ def test_hidden_latent_demand_is_not_used_by_fit() -> None:
     assert dataset.latent_demand
     for value in dataset.latent_demand:
         assert isinstance(value, int)
+def test_validation_matrix_is_reproducible_and_has_independent_baselines() -> None:
+    first = run_hierarchical_validation_matrix(
+        history_lengths=(30,),
+        seeds=(7, 19),
+    )
+    second = run_hierarchical_validation_matrix(
+        history_lengths=(30,),
+        seeds=(7, 19),
+    )
+
+    assert first == second
+    assert set(first) == {"30d_seed7", "30d_seed19"}
+    assert all(
+        set(run.baseline_maes) == {"sales_mean", "moving_average"}
+        for run in first.values()
+    )
+    assert all(run.successful_pairs > 0 for run in first.values())
+    assert all(
+        value >= 0
+        for run in first.values()
+        for value in run.baseline_maes.values()
+    )
+
+
+def test_baselines_use_training_only_not_full_dataset() -> None:
+    training_row = CensoredDemandObservation("store_x", "product_y", 5, 10, day=0)
+    test_row = CensoredDemandObservation("store_x", "product_y", 0, 10, day=1)
+    dataset = SyntheticDemandDataset(
+        observations=(training_row, test_row),
+        latent_demand=(5, 50),
+        true_store_effects={},
+        true_product_effects={},
+    )
+    summary = evaluate_hierarchical_holdout(dataset, train_fraction=0.7, seed=42)
+    assert summary.sales_mean_mae == 45.0
+
+
+def test_no_observation_is_evaluated_on_itself() -> None:
+    training_row = CensoredDemandObservation("store_x", "product_y", 5, 10, day=0)
+    test_row = CensoredDemandObservation("store_x", "product_y", 100, 200, day=1)
+    dataset = SyntheticDemandDataset(
+        observations=(training_row, test_row),
+        latent_demand=(5, 1000),
+        true_store_effects={},
+        true_product_effects={},
+    )
+    summary = evaluate_hierarchical_holdout(dataset, train_fraction=0.7, seed=42)
+    assert summary.sales_mean_mae == abs(5 - 1000)
+
+
+def test_pair_with_no_training_history_abstains_in_baseline() -> None:
+    train_row = CensoredDemandObservation("store_a", "product_a", 5, 10, day=0)
+    test_row = CensoredDemandObservation("store_b", "product_b", 5, 10, day=1)
+    dataset = SyntheticDemandDataset(
+        observations=(train_row, test_row),
+        latent_demand=(5, 5),
+        true_store_effects={},
+        true_product_effects={},
+    )
+    summary = evaluate_hierarchical_holdout(dataset, train_fraction=0.7, seed=42)
+    assert summary.abstained_pairs >= 1
+
+
+def test_mean_interval_coverage_targets_true_mean_not_latent_demand() -> None:
+    dataset = make_synthetic_hierarchical_dataset(days=30, seed=7)
+    summary = evaluate_hierarchical_holdout(dataset, seed=42)
+    mean_coverage = summary.mean_interval_coverage
+    assert mean_coverage is None or 0.0 <= mean_coverage <= 1.0
+    predictive_coverage = summary.predictive_interval_coverage
+    assert predictive_coverage is None or 0.0 <= predictive_coverage <= 1.0
+
+
+def test_predict_interval_returns_nb2_bounds() -> None:
+    dataset = make_synthetic_hierarchical_dataset(days=12, seed=7)
+    fit = fit_hierarchical_censored_demand(dataset.observations)
+    interval = fit.predict_interval("store_a", "product_a")
+    assert interval is not None
+    lower, upper = interval
+    assert math.isfinite(lower) and math.isfinite(upper)
+    assert 0 <= lower <= upper
+
+
+def test_predict_mean_interval_is_mean_parameter_interval() -> None:
+    dataset = make_synthetic_hierarchical_dataset(days=30, seed=7)
+    fit = fit_hierarchical_censored_demand(dataset.observations)
+    assert fit.status == "estimated"
+    interval = fit.predict_mean_interval("store_a", "product_a")
+    assert interval is not None
+    lower, upper = interval
+    prediction = fit.predict_mean("store_a", "product_a")
+    assert prediction is not None
+    assert math.isfinite(lower) and math.isfinite(upper)
+    assert 0 < lower <= prediction <= upper
+
+
+def test_identifiability_store_and_product_effects_sum_to_zero() -> None:
+    dataset = make_synthetic_hierarchical_dataset(days=30, seed=7)
+    fit = fit_hierarchical_censored_demand(dataset.observations)
+    assert fit.status == "estimated"
+    assert abs(sum(fit.store_effects.values())) < 1e-9
+    assert abs(sum(fit.product_effects.values())) < 1e-9
+
+
+def test_single_store_and_single_product_is_identifiable() -> None:
+    rows = tuple(
+        CensoredDemandObservation("s", "p", sales, 20)
+        for sales in (1, 2, 3, 4, 5)
+    )
+    fit = fit_hierarchical_censored_demand(rows)
+    assert fit.status == "estimated"
+    assert fit.store_effects == {"s": 0.0}
+    assert fit.product_effects == {"p": 0.0}
+    prediction = fit.predict_mean("s", "p")
+    assert prediction is not None and prediction > 0
+
+
+def test_single_store_multiple_products_is_identifiable() -> None:
+    rows = tuple(
+        CensoredDemandObservation("s", f"product_{index}", sales, 20)
+        for index, sales in enumerate((1, 2, 3, 4, 5, 6))
+    )
+    fit = fit_hierarchical_censored_demand(rows)
+    assert fit.status == "estimated"
+    assert abs(sum(fit.product_effects.values())) < 1e-9
+    for product_id in fit.product_effects:
+        prediction = fit.predict_mean("s", product_id)
+        assert prediction is not None and prediction > 0
+
+
+def test_global_pooled_fit_returns_single_intercept() -> None:
+    dataset = make_synthetic_hierarchical_dataset(days=12, seed=7)
+    fit = fit_global_pooled_censored_demand(dataset.observations)
+    assert fit.status == "estimated"
+    assert fit.intercept is not None
+    assert fit.store_effects == {}
+    assert fit.product_effects == {}
+
+
+def test_independent_fit_returns_per_pair_means() -> None:
+    dataset = make_synthetic_hierarchical_dataset(days=30, seed=7)
+    means = fit_independent_group_censored_demand(dataset.observations)
+    assert len(means) == 9
+    for mean in means.values():
+        assert mean is not None and mean > 0
+
+
+def test_pooling_ablation_returns_all_approaches() -> None:
+    dataset = make_synthetic_hierarchical_dataset(days=30, seed=7)
+    ablation = run_pooling_ablation(dataset, train_fraction=0.7, seed=42)
+    approaches = ablation["approaches"]
+    assert set(approaches) == {
+        "global_pooled",
+        "independent",
+        "hierarchical_weak",
+        "hierarchical_strong",
+    }
+    assert ablation["conclusion"] in {
+        "pooling_helps",
+        "pooling_hurts",
+        "inconclusive",
+    }
+    paired = ablation["paired_difference_vs_global_pooled"]
+    assert set(paired) == {"independent", "hierarchical_weak", "hierarchical_strong"}
