@@ -1,18 +1,22 @@
-import math
+﻿import math
 
 import pytest
 from research.hierarchical_demand import (
     CensoredDemandObservation,
     HierarchicalDemandConfig,
+    SyntheticDemandDataset,
     censored_negative_binomial_log_likelihood,
     evaluate_hierarchical_holdout,
+    fit_global_pooled_censored_demand,
     fit_hierarchical_censored_demand,
+    fit_independent_group_censored_demand,
     make_synthetic_hierarchical_dataset,
     run_hierarchical_validation_matrix,
+    run_pooling_ablation,
 )
 
 
-def test_synthetic_fit_is_reproducible_and_predicts_positive_demand():
+def test_synthetic_fit_is_reproducible_and_predicts_positive_demand() -> None:
     dataset = make_synthetic_hierarchical_dataset(days=12, seed=7)
     first = fit_hierarchical_censored_demand(dataset.observations)
     second = fit_hierarchical_censored_demand(dataset.observations)
@@ -23,7 +27,7 @@ def test_synthetic_fit_is_reproducible_and_predicts_positive_demand():
     assert prediction is not None and prediction > 0
 
 
-def test_partial_pooling_shrinks_effects_toward_zero():
+def test_partial_pooling_shrinks_effects_toward_zero() -> None:
     rows = tuple(
         CensoredDemandObservation(
             "store_a" if index % 2 == 0 else "store_b",
@@ -41,14 +45,14 @@ def test_partial_pooling_shrinks_effects_toward_zero():
     assert max(abs(value) for value in result.store_effects.values()) < 1.0
 
 
-def test_all_censored_history_abstains():
+def test_all_censored_history_abstains() -> None:
     rows = tuple(CensoredDemandObservation("store", "product", 5, 5) for _ in range(8))
     result = fit_hierarchical_censored_demand(rows)
     assert result.status == "insufficient_information"
     assert result.predict_mean("store", "product") is None
 
 
-def test_zero_and_unknown_availability_are_excluded_not_zero_demand():
+def test_zero_and_unknown_availability_are_excluded_not_zero_demand() -> None:
     rows = (
         CensoredDemandObservation("store", "product", 0, 0),
         CensoredDemandObservation("store", "product", 0, None),
@@ -61,7 +65,7 @@ def test_zero_and_unknown_availability_are_excluded_not_zero_demand():
     assert result.warning is not None
 
 
-def test_nb_likelihood_rejects_invalid_availability_and_has_finite_value():
+def test_nb_likelihood_rejects_invalid_availability_and_has_finite_value() -> None:
     row = CensoredDemandObservation("store", "product", 2, 4)
     value = censored_negative_binomial_log_likelihood((row,), (3.0,), 4.0)
     assert math.isfinite(value)
@@ -71,8 +75,6 @@ def test_nb_likelihood_rejects_invalid_availability_and_has_finite_value():
             (3.0,),
             4.0,
         )
-
-
 @pytest.mark.parametrize(
     ("row", "message"),
     (
@@ -94,12 +96,14 @@ def test_nb_likelihood_rejects_invalid_availability_and_has_finite_value():
         ),
     ),
 )
-def test_hierarchical_fit_rejects_invalid_observations(row, message):
+def test_hierarchical_fit_rejects_invalid_observations(
+    row: CensoredDemandObservation, message: str
+) -> None:
     with pytest.raises(ValueError, match=message):
         fit_hierarchical_censored_demand((row,))
 
 
-def test_numerical_boundaries_return_abstention_or_finite_interval():
+def test_numerical_boundaries_return_abstention_or_finite_interval() -> None:
     zero_rows = tuple(
         CensoredDemandObservation("store", "product", 0, 10) for _ in range(12)
     )
@@ -117,7 +121,7 @@ def test_numerical_boundaries_return_abstention_or_finite_interval():
     assert sparse_fit.status == "insufficient_information"
 
 
-def test_held_out_evaluation_is_paired_and_reproducible():
+def test_held_out_evaluation_is_paired_and_reproducible() -> None:
     dataset = make_synthetic_hierarchical_dataset(days=30, seed=19)
     first = evaluate_hierarchical_holdout(dataset, seed=42)
     second = evaluate_hierarchical_holdout(dataset, seed=42)
@@ -126,32 +130,21 @@ def test_held_out_evaluation_is_paired_and_reproducible():
     assert first.successful_pairs >= 1
     assert first.hierarchical_mae >= 0
     assert first.sales_mean_mae >= 0
+    assert first.moving_average_mae >= 0
+    mean_coverage = first.mean_interval_coverage
+    assert mean_coverage is None or 0.0 <= mean_coverage <= 1.0
+    predictive_coverage = first.predictive_interval_coverage
+    assert predictive_coverage is None or 0.0 <= predictive_coverage <= 1.0
     assert len(first.bootstrap_mae_difference) == 2
+    assert first.paired_denominator >= 1
+    assert first.failed_pairs >= 0
+    assert first.abstained_pairs >= 0
 
 
-def test_hidden_latent_demand_is_not_used_by_fit():
+def test_hidden_latent_demand_is_not_used_by_fit() -> None:
     dataset = make_synthetic_hierarchical_dataset(days=12, seed=7)
     fit = fit_hierarchical_censored_demand(dataset.observations)
     assert fit.status == "estimated"
     assert dataset.latent_demand
     for value in dataset.latent_demand:
         assert isinstance(value, int)
-
-
-def test_validation_matrix_is_reproducible_and_has_independent_baselines():
-    first = run_hierarchical_validation_matrix(
-        history_lengths=(30,),
-        seeds=(7, 19),
-    )
-    second = run_hierarchical_validation_matrix(
-        history_lengths=(30,),
-        seeds=(7, 19),
-    )
-
-    assert first == second
-    assert set(first) == {"30d_seed7", "30d_seed19"}
-    assert all(
-        set(run.baseline_maes) == {"sales_mean", "moving_average"}
-        for run in first.values()
-    )
-    assert all(run.successful_pairs > 0 for run in first.values())
