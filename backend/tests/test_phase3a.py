@@ -148,6 +148,8 @@ def test_hidden_latent_demand_is_not_used_by_fit() -> None:
     assert dataset.latent_demand
     for value in dataset.latent_demand:
         assert isinstance(value, int)
+
+
 def test_validation_matrix_is_reproducible_and_has_independent_baselines() -> None:
     first = run_hierarchical_validation_matrix(
         history_lengths=(30,),
@@ -209,6 +211,10 @@ def test_pair_with_no_training_history_abstains_in_baseline() -> None:
     )
     summary = evaluate_hierarchical_holdout(dataset, train_fraction=0.7, seed=42)
     assert summary.abstained_pairs >= 1
+    assert summary.sales_mean_mae is None
+    assert summary.moving_average_mae is None
+    assert summary.paired_mae_difference is None
+    assert summary.bootstrap_mae_difference is None
 
 
 def test_mean_interval_coverage_targets_true_mean_not_latent_demand() -> None:
@@ -218,6 +224,35 @@ def test_mean_interval_coverage_targets_true_mean_not_latent_demand() -> None:
     assert mean_coverage is None or 0.0 <= mean_coverage <= 1.0
     predictive_coverage = summary.predictive_interval_coverage
     assert predictive_coverage is None or 0.0 <= predictive_coverage <= 1.0
+
+
+def test_future_observation_mutation_does_not_change_historical_forecasts() -> None:
+    first = make_synthetic_hierarchical_dataset(days=30, seed=19)
+    changed_observations = tuple(
+        CensoredDemandObservation(
+            row.store_id,
+            row.product_id,
+            200 if row.day is not None and row.day >= 21 else row.sales,
+            200 if row.day is not None and row.day >= 21 else row.available_stock,
+            day=row.day,
+        )
+        if row.day is not None and row.day >= 21
+        else row
+        for row in first.observations
+    )
+    changed = SyntheticDemandDataset(
+        observations=changed_observations,
+        latent_demand=first.latent_demand,
+        true_store_effects=first.true_store_effects,
+        true_product_effects=first.true_product_effects,
+        true_daily_means=first.true_daily_means,
+    )
+    first_summary = evaluate_hierarchical_holdout(first, seed=42)
+    changed_summary = evaluate_hierarchical_holdout(changed, seed=42)
+    assert first_summary.hierarchical_mae == changed_summary.hierarchical_mae
+    assert first_summary.bootstrap_mae_difference == (
+        changed_summary.bootstrap_mae_difference
+    )
 
 
 def test_predict_interval_returns_nb2_bounds() -> None:
@@ -304,10 +339,8 @@ def test_pooling_ablation_returns_all_approaches() -> None:
         "hierarchical_weak",
         "hierarchical_strong",
     }
-    assert ablation["conclusion"] in {
-        "pooling_helps",
-        "pooling_hurts",
-        "inconclusive",
-    }
+    assert ablation["conclusion"] == (
+        "evidence_reported_no_arbitrary_superiority_rule"
+    )
     paired = ablation["paired_difference_vs_global_pooled"]
     assert set(paired) == {"independent", "hierarchical_weak", "hierarchical_strong"}

@@ -200,13 +200,13 @@ class SyntheticDemandDataset:
 class HierarchicalHoldoutSummary:
     """Paired held-out accuracy and interval coverage for Phase 3A."""
 
-    hierarchical_mae: float
-    sales_mean_mae: float
-    paired_mae_difference: float
-    bootstrap_mae_difference: tuple[float, float]
+    hierarchical_mae: float | None
+    sales_mean_mae: float | None
+    moving_average_mae: float | None
+    paired_mae_difference: float | None
+    bootstrap_mae_difference: tuple[float, float] | None
     interval_coverage: float | None
     successful_pairs: int
-    moving_average_mae: float = 0.0
     failed_pairs: int = 0
     abstained_pairs: int = 0
     paired_denominator: int = 0
@@ -219,10 +219,10 @@ class HierarchicalValidationRun:
     """Phase 3A evidence for one history length and seed."""
 
     name: str
-    hierarchical_mae: float
-    baseline_maes: dict[str, float]
-    paired_difference: float
-    paired_bootstrap_interval: tuple[float, float]
+    hierarchical_mae: float | None
+    baseline_maes: dict[str, float | None]
+    paired_difference: float | None
+    paired_bootstrap_interval: tuple[float, float] | None
     interval_coverage: float | None
     successful_pairs: int
 
@@ -793,12 +793,9 @@ def evaluate_hierarchical_holdout(
             )
             bootstrap_values.append(float(np.mean(sample)))
         bootstrap_values.sort()
-        bootstrap_interval = (
-            bootstrap_values[50],
-            bootstrap_values[949],
-        )
+        bootstrap_interval = (bootstrap_values[50], bootstrap_values[949])
     else:
-        bootstrap_interval = (0.0, 0.0)
+        bootstrap_interval = None
 
     paired_denominator = len(differences)
     mean_interval_coverage: float | None = (
@@ -816,18 +813,18 @@ def evaluate_hierarchical_holdout(
         hierarchical_mae=(
             sum(hierarchical_errors) / len(hierarchical_errors)
             if hierarchical_errors
-            else 0.0
+            else None
         ),
         sales_mean_mae=(
-            sum(sales_errors) / len(sales_errors) if sales_errors else 0.0
+            sum(sales_errors) / len(sales_errors) if sales_errors else None
         ),
         moving_average_mae=(
             sum(moving_average_errors) / len(moving_average_errors)
             if moving_average_errors
-            else 0.0
+            else None
         ),
         paired_mae_difference=(
-            sum(differences) / len(differences) if differences else 0.0
+            sum(differences) / len(differences) if differences else None
         ),
         bootstrap_mae_difference=bootstrap_interval,
         interval_coverage=mean_interval_coverage,
@@ -856,7 +853,7 @@ def run_hierarchical_validation_matrix(
             )
             summary = evaluate_hierarchical_holdout(dataset, seed=100 + seed)
 
-            baseline_maes: dict[str, float] = {
+            baseline_maes: dict[str, float | None] = {
                 "sales_mean": summary.sales_mean_mae,
                 "moving_average": summary.moving_average_mae,
             }
@@ -876,7 +873,7 @@ def _evaluate_predictor(
     predict: Any,
     dataset: SyntheticDemandDataset,
     test_indices: Sequence[int],
-) -> tuple[float, int, int]:
+) -> tuple[float | None, int, int]:
     """Evaluate a predict(store, product) -> float | None callable on test rows.
 
     Returns (mae, failures, count) where failures is the number of None
@@ -894,7 +891,7 @@ def _evaluate_predictor(
             continue
         errors.append(abs(forecast - hidden))
         count += 1
-    mae = sum(errors) / len(errors) if errors else 0.0
+    mae = sum(errors) / len(errors) if errors else None
     return mae, failures, count
 
 
@@ -968,7 +965,27 @@ def run_pooling_ablation(
         if strong_forecast is not None:
             diff_strong.append(abs(strong_forecast - hidden) - global_error)
 
-    mean_values = lambda values: (sum(values) / len(values)) if values else 0.0  # noqa: E731
+    def mean_value(values: Sequence[float]) -> float | None:
+        return sum(values) / len(values) if values else None
+
+    def bootstrap_interval(values: Sequence[float], seed_value: int) -> tuple[float, float] | None:
+        if not values:
+            return None
+        rng = np.random.default_rng(seed_value)
+        samples = [
+            float(
+                np.mean(
+                    rng.choice(
+                        np.asarray(values),
+                        size=len(values),
+                        replace=True,
+                    )
+                )
+            )
+            for _ in range(1000)
+        ]
+        samples.sort()
+        return (samples[50], samples[949])
 
     approaches = {
         "global_pooled": {
@@ -993,24 +1010,27 @@ def run_pooling_ablation(
         },
     }
     paired_difference_vs_global = {
-        "independent": mean_values(diff_independent),
-        "hierarchical_weak": mean_values(diff_weak),
-        "hierarchical_strong": mean_values(diff_strong),
+        "independent": {
+            "mean_difference": mean_value(diff_independent),
+            "bootstrap_interval": bootstrap_interval(diff_independent, seed),
+            "paired_count": len(diff_independent),
+        },
+        "hierarchical_weak": {
+            "mean_difference": mean_value(diff_weak),
+            "bootstrap_interval": bootstrap_interval(diff_weak, seed + 1),
+            "paired_count": len(diff_weak),
+        },
+        "hierarchical_strong": {
+            "mean_difference": mean_value(diff_strong),
+            "bootstrap_interval": bootstrap_interval(diff_strong, seed + 2),
+            "paired_count": len(diff_strong),
+        },
     }
-
-    global_mae_val = approaches["global_pooled"]["mae"]
-    independent_mae_val = approaches["independent"]["mae"]
-    if independent_mae_val > 0 and global_mae_val < independent_mae_val * 0.95:
-        conclusion = "pooling_helps"
-    elif independent_mae_val > 0 and global_mae_val > independent_mae_val * 1.05:
-        conclusion = "pooling_hurts"
-    else:
-        conclusion = "inconclusive"
 
     return {
         "approaches": approaches,
         "paired_difference_vs_global_pooled": paired_difference_vs_global,
-        "conclusion": conclusion,
+        "conclusion": "evidence_reported_no_arbitrary_superiority_rule",
         "train_fraction": train_fraction,
         "seed": seed,
         "test_pairs": len(test_indices),
@@ -1088,7 +1108,11 @@ def run_reproducible_study(
                     "predictive_interval_coverage": summary.predictive_interval_coverage,
                 },
                 "paired_denominator": summary.paired_denominator,
-                "bootstrap_interval": list(summary.bootstrap_mae_difference),
+                "bootstrap_interval": (
+                    list(summary.bootstrap_mae_difference)
+                    if summary.bootstrap_mae_difference is not None
+                    else None
+                ),
                 "runtime_seconds": runtime,
                 "numerical_failures": {
                     "failed_pairs": summary.failed_pairs,
