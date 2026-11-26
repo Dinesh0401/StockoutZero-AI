@@ -147,6 +147,26 @@ inventory reconciliation. Neural and particle methods are not required until
 a transparent probabilistic implementation has established a baseline and
 identified its failure modes.
 
+### Phase 3B initial implementation
+
+`backend/research/uncertain_inventory.py` implements a research-only finite-state
+Bayesian filter over sellable unit counts. It starts from an explicit
+probability distribution and processes each day in event order: opening stock,
+known receipts, known removals, Poisson unrecorded shrinkage, censored sales,
+and end-of-day book/audit measurements. Sales likelihoods use an NB2 demand
+distribution: uncensored sales use the probability mass, while sales equal to
+available stock use the survival probability. Exact audits can collapse the
+posterior; ledger counts use a bounded, normalized discrete-Laplace error model.
+The filter returns expected beginning availability, a full stock-count
+distribution, and model-conditional stockout probability for each day.
+
+This is not a fitted availability model or production forecast. Demand mean,
+demand dispersion, shrinkage rate, count range, and initial inventory prior
+are fixed inputs; outputs are conditional on those assumptions. Impossible
+sales/audit combinations fail explicitly. Merchant validation, learned
+shrinkage parameters, event timestamp ingestion, and integration into
+replenishment decisions remain outstanding.
+
 ## Component C: Cost-aware stock audits
 
 An audit is recommended only if:
@@ -244,31 +264,46 @@ The implementation now includes:
 - Hidden latent demand retained only in evaluator datasets; fitting receives
   observed sales and known availability only.
 - A reproducible validation-matrix API reports held-out performance against
-  sales mean and moving average baselines across configured seeds and history
-  lengths, with paired bootstrap intervals and interval coverage.
+  sales mean, moving average, global-pooled NB2, per-pair NB2, and hierarchical
+  pooling variants across configured seeds and history lengths.
+- Paired bootstrap intervals resample store-product clusters rather than
+  treating repeated daily observations for the same pair as independent.
+- The reproducible study runner writes configuration, forecasts, hidden
+  evaluation targets, pooling ablations, fit failures, runtime, and both
+  parameter-mean and realized-demand interval coverage to JSON and CSV.
 
 This work does not yet establish statistically demonstrated pooling benefit or
-predictive calibration across a full multiseed experiment matrix. Approval also
-requires independent baselines, identifiable synthetic coverage studies, and
-real-world merchant validation. The held-out evaluator is evidence scaffolding,
-not proof of model superiority.
+predictive calibration across a full multiseed experiment matrix. These
+synthetic runs are evidence scaffolding, not proof of model superiority or
+calibration. Approval also requires independent reference implementations,
+identifiable synthetic coverage studies, and real-world merchant validation.
 
-An initial reproducible six-run synthetic matrix produced the following paired
-MAE differences (hierarchical minus sales mean) and interval coverage:
+The default 10-run synthetic study (`python -m research.phase3a`) used five
+independent seeds and 30-/90-day histories. The table reports held-out MAE,
+paired cluster-level differences (hierarchical minus sales mean), 90% bootstrap
+intervals resampled over the nine store-product clusters in each run, and
+realized-demand predictive interval coverage:
 
-| History | Seed | Hierarchical MAE | Sales mean MAE | Paired difference | 90% bootstrap interval | Coverage |
+| History | Seed | Hierarchical MAE | Sales mean MAE | Paired difference | 90% cluster bootstrap interval | Predictive coverage |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 30 days | 7 | 3.6323 | 3.3400 | +0.2923 | [-0.0025, 0.5737] | 85.19% |
-| 30 days | 19 | 3.1438 | 3.0089 | +0.1349 | [-0.0240, 0.3103] | 82.72% |
-| 30 days | 42 | 2.9094 | 3.0766 | -0.1672 | [-0.3583, 0.0243] | 92.59% |
-| 90 days | 7 | 2.7242 | 2.5661 | +0.1581 | [0.0385, 0.2627] | 88.89% |
-| 90 days | 19 | 2.8428 | 2.9248 | -0.0819 | [-0.1929, 0.0373] | 89.71% |
-| 90 days | 42 | 2.8339 | 3.0222 | -0.1884 | [-0.2974, -0.0825] | 86.83% |
+| 30 days | 1 | 2.9933 | 3.1064 | -0.1131 | [-0.3471, 0.1043] | 90.12% |
+| 30 days | 2 | 2.6069 | 2.6749 | -0.0680 | [-0.2161, 0.1303] | 96.30% |
+| 30 days | 3 | 2.7967 | 2.8407 | -0.0440 | [-0.1106, 0.0234] | 92.59% |
+| 30 days | 4 | 2.8333 | 2.9494 | -0.1161 | [-0.3959, 0.1181] | 95.06% |
+| 30 days | 5 | 3.0236 | 2.8589 | +0.1647 | [-0.0183, 0.3696] | 96.30% |
+| 90 days | 1 | 3.4602 | 3.3868 | +0.0734 | [-0.1003, 0.2900] | 88.89% |
+| 90 days | 2 | 3.1029 | 3.1467 | -0.0438 | [-0.1332, 0.0476] | 90.48% |
+| 90 days | 3 | 3.1580 | 3.1589 | -0.0009 | [-0.2266, 0.1449] | 91.67% |
+| 90 days | 4 | 3.0324 | 3.0541 | -0.0218 | [-0.2254, 0.1736] | 94.44% |
+| 90 days | 5 | 2.9715 | 2.9599 | +0.0115 | [-0.0877, 0.1049] | 93.65% |
 
-Negative paired differences favor the hierarchical model. The matrix is mixed:
-some intervals exclude zero favorably, some exclude zero unfavorably, and others
-cross zero. It is therefore scientific evidence for further testing, not a
-merger or production-readiness claim.
+Mean predictive coverage was 94.07% for 30-day histories and 91.83% for
+90-day histories. Mean hierarchical and sales-mean MAE were 2.8507 vs 2.8861
+(30 days) and 3.1450 vs 3.1413 (90 days). Every paired interval crosses zero;
+the hierarchical model does not demonstrate a reliable accuracy advantage in
+this study. Coverage is an empirical synthetic result, not a calibration
+guarantee. Nine clusters per run and five data seeds are still too few to
+support broad scientific or production claims.
 
 ## Remaining limitations
 

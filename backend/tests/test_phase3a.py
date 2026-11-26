@@ -1,4 +1,5 @@
-﻿import math
+import json
+import math
 
 import pytest
 from research.hierarchical_demand import (
@@ -13,6 +14,7 @@ from research.hierarchical_demand import (
     make_synthetic_hierarchical_dataset,
     run_hierarchical_validation_matrix,
     run_pooling_ablation,
+    run_reproducible_study,
 )
 
 
@@ -75,6 +77,8 @@ def test_nb_likelihood_rejects_invalid_availability_and_has_finite_value() -> No
             (3.0,),
             4.0,
         )
+
+
 @pytest.mark.parametrize(
     ("row", "message"),
     (
@@ -137,6 +141,7 @@ def test_held_out_evaluation_is_paired_and_reproducible() -> None:
     assert predictive_coverage is None or 0.0 <= predictive_coverage <= 1.0
     assert len(first.bootstrap_mae_difference) == 2
     assert first.paired_denominator >= 1
+    assert first.paired_clusters < first.paired_denominator
     assert first.failed_pairs >= 0
     assert first.abstained_pairs >= 0
 
@@ -163,14 +168,25 @@ def test_validation_matrix_is_reproducible_and_has_independent_baselines() -> No
     assert first == second
     assert set(first) == {"30d_seed7", "30d_seed19"}
     assert all(
-        set(run.baseline_maes) == {"sales_mean", "moving_average"}
+        set(run.baseline_maes)
+        == {
+            "sales_mean",
+            "moving_average",
+            "global_pooled",
+            "independent",
+            "hierarchical_weak",
+            "hierarchical_strong",
+        }
         for run in first.values()
     )
     assert all(run.successful_pairs > 0 for run in first.values())
     assert all(
-        value >= 0
+        run.predictive_interval_coverage is None
+        or 0 <= run.predictive_interval_coverage <= 1
         for run in first.values()
-        for value in run.baseline_maes.values()
+    )
+    assert all(
+        value >= 0 for run in first.values() for value in run.baseline_maes.values()
     )
 
 
@@ -288,8 +304,7 @@ def test_identifiability_store_and_product_effects_sum_to_zero() -> None:
 
 def test_single_store_and_single_product_is_identifiable() -> None:
     rows = tuple(
-        CensoredDemandObservation("s", "p", sales, 20)
-        for sales in (1, 2, 3, 4, 5)
+        CensoredDemandObservation("s", "p", sales, 20) for sales in (1, 2, 3, 4, 5)
     )
     fit = fit_hierarchical_censored_demand(rows)
     assert fit.status == "estimated"
@@ -339,8 +354,42 @@ def test_pooling_ablation_returns_all_approaches() -> None:
         "hierarchical_weak",
         "hierarchical_strong",
     }
-    assert ablation["conclusion"] == (
-        "evidence_reported_no_arbitrary_superiority_rule"
-    )
+    assert ablation["conclusion"] == ("evidence_reported_no_arbitrary_superiority_rule")
     paired = ablation["paired_difference_vs_global_pooled"]
     assert set(paired) == {"independent", "hierarchical_weak", "hierarchical_strong"}
+    assert all(
+        result["paired_clusters"] < result["paired_count"] for result in paired.values()
+    )
+
+
+def test_reproducible_study_writes_machine_readable_results(tmp_path) -> None:
+    output = tmp_path / "nested" / "study.json"
+    records = run_reproducible_study(
+        output_path=str(output),
+        seeds=(7,),
+        history_lengths=(12,),
+    )
+
+    assert output.exists()
+    assert output.with_suffix(".csv").exists()
+    saved_records = json.loads(output.read_text(encoding="utf-8"))
+    assert saved_records[0]["trial_id"] == records[0]["trial_id"]
+    assert saved_records[0]["error_metrics"] == records[0]["error_metrics"]
+    assert records[0]["baseline_identifiers"] == [
+        "sales_mean",
+        "moving_average",
+        "global_pooled",
+        "independent",
+    ]
+    assert set(records[0]["error_metrics"]["pooling_ablations"]) == {
+        "global_pooled",
+        "independent",
+        "hierarchical_weak",
+        "hierarchical_strong",
+    }
+    assert (
+        records[0]["pooling_ablation"]["config"]["hierarchical_weak"][
+            "store_prior_scale"
+        ]
+        == 1.5
+    )
