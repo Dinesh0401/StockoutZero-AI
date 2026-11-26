@@ -65,12 +65,13 @@ class PairedPolicyMetric:
 def simulate_inventory(
     demand: Sequence[int],
     reorder_points: Sequence[int],
-    costs: InventoryCosts = InventoryCosts(),
+    costs: InventoryCosts | None = None,
     initial_stock: int = 0,
     lead_time_days: int = 0,
     case_pack: int = 1,
 ) -> InventorySimulation:
     """Simulate daily replenishment decisions with outstanding purchase orders."""
+    costs = costs or InventoryCosts()
     if len(demand) != len(reorder_points):
         raise ValueError("Demand and reorder points must have equal lengths")
     if initial_stock < 0:
@@ -130,11 +131,12 @@ def simulate_forecast_policy(
     daily_forecast: Sequence[float],
     lead_time_days: int,
     safety_days: float = 0.0,
-    costs: InventoryCosts = InventoryCosts(),
+    costs: InventoryCosts | None = None,
     initial_stock: int = 0,
     case_pack: int = 1,
 ) -> InventorySimulation:
     """Convert rolling forecasts into lead-time reorder points and simulate them."""
+    costs = costs or InventoryCosts()
     if len(demand) != len(daily_forecast):
         raise ValueError("Demand and forecasts must have equal lengths")
     if lead_time_days < 0 or safety_days < 0:
@@ -163,10 +165,11 @@ def compare_baseline_inventory_policies(
     baseline_names: Sequence[str],
     baseline_suite: dict[str, CaseBaseline],
     lead_time_days: int = 7,
-    costs: InventoryCosts = InventoryCosts(),
+    costs: InventoryCosts | None = None,
     case_pack: int = 1,
 ) -> dict[str, InventorySimulation]:
     """Generate each baseline's forecast and simulate its replenishment outcome."""
+    costs = costs or InventoryCosts()
     warnings.warn(
         "compare_baseline_inventory_policies is deprecated; use "
         "compare_rolling_baseline_policies for paired trial-level results.",
@@ -212,10 +215,11 @@ def compare_rolling_baseline_policies(
     baseline_suite: dict[str, CaseBaseline],
     lead_time_days: int = 7,
     case_pack: int = 1,
-    costs: InventoryCosts = InventoryCosts(),
+    costs: InventoryCosts | None = None,
     abstention_fallback: str = "zero",
 ) -> dict[str, RollingPolicyComparison]:
     """Run every model on every trial with rolling, decision-time forecasts."""
+    costs = costs or InventoryCosts()
     if lead_time_days < 0:
         raise ValueError("Lead time cannot be negative")
     if case_pack < 1:

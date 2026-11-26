@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import csv
 import json
-import math
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from importlib import import_module
 from math import exp, isfinite, log, log1p, sqrt
+from pathlib import Path
 from typing import Any
 
 from scipy.optimize import minimize
@@ -168,16 +168,16 @@ class HierarchicalDemandFit:
         mu = self.predict_mean(store_id, product_id)
         if mu is None or not isfinite(mu) or mu <= 0:
             return None
-        if self.dispersion is None or not isfinite(self.dispersion) or self.dispersion <= 0:
+        if (
+            self.dispersion is None
+            or not isfinite(self.dispersion)
+            or self.dispersion <= 0
+        ):
             return None
         p = self.dispersion / (self.dispersion + mu)
         try:
-            lower = float(
-                nbinom.ppf((1.0 - coverage) / 2.0, self.dispersion, p)
-            )
-            upper = float(
-                nbinom.ppf((1.0 + coverage) / 2.0, self.dispersion, p)
-            )
+            lower = float(nbinom.ppf((1.0 - coverage) / 2.0, self.dispersion, p))
+            upper = float(nbinom.ppf((1.0 + coverage) / 2.0, self.dispersion, p))
         except (OverflowError, ValueError):
             return None
         if not isfinite(lower) or not isfinite(upper) or lower < 0:
@@ -210,6 +210,7 @@ class HierarchicalHoldoutSummary:
     failed_pairs: int = 0
     abstained_pairs: int = 0
     paired_denominator: int = 0
+    paired_clusters: int = 0
     mean_interval_coverage: float | None = None
     predictive_interval_coverage: float | None = None
 
@@ -225,6 +226,7 @@ class HierarchicalValidationRun:
     paired_bootstrap_interval: tuple[float, float] | None
     interval_coverage: float | None
     successful_pairs: int
+    predictive_interval_coverage: float | None = None
 
 
 @dataclass(frozen=True)
@@ -320,9 +322,7 @@ def _fit_censored_nb2_single_mean(
     ]
     if not usable:
         return None
-    uncensored = [
-        row for row in usable if row.sales < (row.available_stock or 0)
-    ]
+    uncensored = [row for row in usable if row.sales < (row.available_stock or 0)]
     if not uncensored:
         return None
     sales_mean = max(
@@ -353,9 +353,11 @@ def _fit_censored_nb2_single_mean(
     if not isfinite(mean) or mean <= 0:
         return None
     return mean
+
+
 def fit_hierarchical_censored_demand(
     observations: Sequence[CensoredDemandObservation],
-    config: HierarchicalDemandConfig = HierarchicalDemandConfig(),
+    config: HierarchicalDemandConfig | None = None,
 ) -> HierarchicalDemandFit:
     """Fit pooled store and product effects with a censored NB2 MAP objective.
 
@@ -368,6 +370,7 @@ def fit_hierarchical_censored_demand(
     warning.  A history containing no uncensored positive-stock observation is
     explicitly non-identifiable and returns an abstention result.
     """
+    config = config or HierarchicalDemandConfig()
     if config.dispersion <= 0:
         raise ValueError("Dispersion must be positive")
     if config.store_prior_scale <= 0 or config.product_prior_scale <= 0:
@@ -393,9 +396,7 @@ def fit_hierarchical_censored_demand(
             None,
             config.dispersion,
         )
-    uncensored = [
-        row for row in usable if row.sales < (row.available_stock or 0)
-    ]
+    uncensored = [row for row in usable if row.sales < (row.available_stock or 0)]
     if not uncensored:
         return HierarchicalDemandFit(
             "insufficient_information",
@@ -426,7 +427,9 @@ def fit_hierarchical_censored_demand(
     initial = np.zeros(n_free, dtype=float)
     initial[0] = log(sales_mean)
 
-    def effects_from_parameters(parameters: Any) -> tuple[float, list[float], list[float]]:
+    def effects_from_parameters(
+        parameters: Any,
+    ) -> tuple[float, list[float], list[float]]:
         intercept = float(parameters[0])
         store_free = parameters[1 : 1 + n_store_free]
         product_free = parameters[1 + n_store_free :]
@@ -445,9 +448,7 @@ def fit_hierarchical_censored_demand(
         return intercept, store_effects, product_effects
 
     def objective(parameters: Any) -> float:
-        intercept, store_effects, product_effects = effects_from_parameters(
-            parameters
-        )
+        intercept, store_effects, product_effects = effects_from_parameters(parameters)
         means = [
             exp(
                 intercept
@@ -528,9 +529,10 @@ def fit_hierarchical_censored_demand(
 
 def fit_global_pooled_censored_demand(
     observations: Sequence[CensoredDemandObservation],
-    config: HierarchicalDemandConfig = HierarchicalDemandConfig(),
+    config: HierarchicalDemandConfig | None = None,
 ) -> HierarchicalDemandFit:
     """Intercept-only NB2 censored fit (global pooling, no store/product effects)."""
+    config = config or HierarchicalDemandConfig()
     if config.dispersion <= 0:
         raise ValueError("Dispersion must be positive")
     _validate_observations(observations)
@@ -552,9 +554,7 @@ def fit_global_pooled_censored_demand(
             None,
             config.dispersion,
         )
-    uncensored = [
-        row for row in usable if row.sales < (row.available_stock or 0)
-    ]
+    uncensored = [row for row in usable if row.sales < (row.available_stock or 0)]
     if not uncensored:
         return HierarchicalDemandFit(
             "insufficient_information",
@@ -596,11 +596,14 @@ def fit_global_pooled_censored_demand(
         None,
         config.dispersion,
     )
+
+
 def fit_independent_group_censored_demand(
     observations: Sequence[CensoredDemandObservation],
-    config: HierarchicalDemandConfig = HierarchicalDemandConfig(),
+    config: HierarchicalDemandConfig | None = None,
 ) -> dict[tuple[str, str], float | None]:
     """Per store-product censored NB2 mean using only that pair's usable rows."""
+    config = config or HierarchicalDemandConfig()
     if config.dispersion <= 0:
         raise ValueError("Dispersion must be positive")
     _validate_observations(observations)
@@ -689,9 +692,7 @@ def _chronological_split(
         train_day_count = 1
     train_days = set(unique_days[:train_day_count])
     train_indices = [
-        index
-        for index, row in enumerate(dataset.observations)
-        if row.day in train_days
+        index for index, row in enumerate(dataset.observations) if row.day in train_days
     ]
     test_indices = [
         index
@@ -726,14 +727,12 @@ def evaluate_hierarchical_holdout(
     training_sales: dict[tuple[str, str], list[int]] = {}
     for index in train_indices:
         row = dataset.observations[index]
-        training_sales.setdefault((row.store_id, row.product_id), []).append(
-            row.sales
-        )
+        training_sales.setdefault((row.store_id, row.product_id), []).append(row.sales)
 
     hierarchical_errors: list[float] = []
     sales_errors: list[float] = []
     moving_average_errors: list[float] = []
-    differences: list[float] = []
+    paired_differences_by_group: dict[tuple[str, str], list[float]] = {}
     mean_interval_hits: list[bool] = []
     mean_interval_total = 0
     predictive_interval_hits: list[bool] = []
@@ -747,9 +746,7 @@ def evaluate_hierarchical_holdout(
         hierarchical = fit.predict_mean(row.store_id, row.product_id)
         history = training_sales.get((row.store_id, row.product_id), [])
         sales_mean = sum(history) / len(history) if history else None
-        moving_average = (
-            sum(history[-7:]) / len(history[-7:]) if history else None
-        )
+        moving_average = sum(history[-7:]) / len(history[-7:]) if history else None
 
         hierarchical_error: float | None = None
         if hierarchical is not None:
@@ -766,13 +763,18 @@ def evaluate_hierarchical_holdout(
             moving_average_errors.append(abs(moving_average - hidden))
 
         if hierarchical_error is not None and sales_mean is not None:
-            differences.append(hierarchical_error - abs(sales_mean - hidden))
+            paired_differences_by_group.setdefault(
+                (row.store_id, row.product_id), []
+            ).append(hierarchical_error - abs(sales_mean - hidden))
 
         true_mean = dataset.true_daily_means.get((row.store_id, row.product_id))
         mean_interval = fit.predict_mean_interval(row.store_id, row.product_id)
         if mean_interval is not None:
             mean_interval_total += 1
-            if true_mean is not None and mean_interval[0] <= true_mean <= mean_interval[1]:
+            if (
+                true_mean is not None
+                and mean_interval[0] <= true_mean <= mean_interval[1]
+            ):
                 mean_interval_hits.append(True)
             else:
                 mean_interval_hits.append(False)
@@ -784,12 +786,19 @@ def evaluate_hierarchical_holdout(
             else:
                 predictive_interval_hits.append(False)
 
+    cluster_differences = [
+        sum(values) / len(values)
+        for values in paired_differences_by_group.values()
+        if values
+    ]
     bootstrap_values: list[float] = []
-    if differences:
+    if cluster_differences:
         bootstrap_rng = np.random.default_rng(seed)
         for _ in range(1000):
             sample = bootstrap_rng.choice(
-                np.asarray(differences), size=len(differences), replace=True
+                np.asarray(cluster_differences),
+                size=len(cluster_differences),
+                replace=True,
             )
             bootstrap_values.append(float(np.mean(sample)))
         bootstrap_values.sort()
@@ -797,7 +806,14 @@ def evaluate_hierarchical_holdout(
     else:
         bootstrap_interval = None
 
-    paired_denominator = len(differences)
+    paired_denominator = sum(
+        len(values) for values in paired_differences_by_group.values()
+    )
+    paired_difference = (
+        sum(cluster_differences) / len(cluster_differences)
+        if cluster_differences
+        else None
+    )
     mean_interval_coverage: float | None = (
         sum(mean_interval_hits) / len(mean_interval_hits)
         if mean_interval_hits
@@ -823,15 +839,14 @@ def evaluate_hierarchical_holdout(
             if moving_average_errors
             else None
         ),
-        paired_mae_difference=(
-            sum(differences) / len(differences) if differences else None
-        ),
+        paired_mae_difference=(paired_difference),
         bootstrap_mae_difference=bootstrap_interval,
         interval_coverage=mean_interval_coverage,
         successful_pairs=paired_denominator,
         failed_pairs=failed_pairs,
         abstained_pairs=abstained_pairs,
         paired_denominator=paired_denominator,
+        paired_clusters=len(cluster_differences),
         mean_interval_coverage=mean_interval_coverage,
         predictive_interval_coverage=predictive_interval_coverage,
     )
@@ -852,11 +867,17 @@ def run_hierarchical_validation_matrix(
                 seed=seed,
             )
             summary = evaluate_hierarchical_holdout(dataset, seed=100 + seed)
-
+            ablation = run_pooling_ablation(dataset, seed=100 + seed)
             baseline_maes: dict[str, float | None] = {
                 "sales_mean": summary.sales_mean_mae,
                 "moving_average": summary.moving_average_mae,
             }
+            baseline_maes.update(
+                {
+                    name: metrics["mae"]
+                    for name, metrics in ablation["approaches"].items()
+                }
+            )
 
             name = f"{history_days}d_seed{seed}"
             runs[name] = HierarchicalValidationRun(
@@ -867,8 +888,11 @@ def run_hierarchical_validation_matrix(
                 paired_bootstrap_interval=summary.bootstrap_mae_difference,
                 interval_coverage=summary.interval_coverage,
                 successful_pairs=summary.successful_pairs,
+                predictive_interval_coverage=summary.predictive_interval_coverage,
             )
     return runs
+
+
 def _evaluate_predictor(
     predict: Any,
     dataset: SyntheticDemandDataset,
@@ -905,6 +929,12 @@ def run_pooling_ablation(
     Returns MAE per approach, failure/abstention counts, paired differences
     versus global pooled, and a short conclusion.
     """
+    if not 0 < train_fraction < 1:
+        raise ValueError("train_fraction must be between zero and one")
+    if len(dataset.observations) != len(dataset.latent_demand):
+        raise ValueError("Observations and latent demand must have equal lengths")
+    if not dataset.observations:
+        raise ValueError("At least one observation is required")
     train_indices, test_indices = _chronological_split(dataset, train_fraction)
     training = tuple(dataset.observations[index] for index in train_indices)
 
@@ -927,25 +957,29 @@ def run_pooling_ablation(
         independent_predict, dataset, test_indices
     )
 
-    weak_fit = fit_hierarchical_censored_demand(
-        training,
-        HierarchicalDemandConfig(store_prior_scale=1.5, product_prior_scale=1.5),
+    weak_config = HierarchicalDemandConfig(
+        store_prior_scale=1.5,
+        product_prior_scale=1.5,
     )
+    weak_fit = fit_hierarchical_censored_demand(training, weak_config)
     weak_mae, weak_failures, weak_count = _evaluate_predictor(
         weak_fit.predict_mean, dataset, test_indices
     )
 
-    strong_fit = fit_hierarchical_censored_demand(
-        training,
-        HierarchicalDemandConfig(store_prior_scale=0.25, product_prior_scale=0.25),
+    strong_config = HierarchicalDemandConfig(
+        store_prior_scale=0.25,
+        product_prior_scale=0.25,
     )
+    strong_fit = fit_hierarchical_censored_demand(training, strong_config)
     strong_mae, strong_failures, strong_count = _evaluate_predictor(
         strong_fit.predict_mean, dataset, test_indices
     )
 
-    diff_independent: list[float] = []
-    diff_weak: list[float] = []
-    diff_strong: list[float] = []
+    grouped_differences: dict[str, dict[tuple[str, str], list[float]]] = {
+        "independent": {},
+        "hierarchical_weak": {},
+        "hierarchical_strong": {},
+    }
     for index in test_indices:
         row = dataset.observations[index]
         hidden = float(dataset.latent_demand[index])
@@ -955,20 +989,31 @@ def run_pooling_ablation(
         global_error = abs(global_forecast - hidden)
         independent_forecast = independent_predict(row.store_id, row.product_id)
         if independent_forecast is not None:
-            diff_independent.append(
-                abs(independent_forecast - hidden) - global_error
-            )
+            grouped_differences["independent"].setdefault(
+                (row.store_id, row.product_id), []
+            ).append(abs(independent_forecast - hidden) - global_error)
         weak_forecast = weak_fit.predict_mean(row.store_id, row.product_id)
         if weak_forecast is not None:
-            diff_weak.append(abs(weak_forecast - hidden) - global_error)
+            grouped_differences["hierarchical_weak"].setdefault(
+                (row.store_id, row.product_id), []
+            ).append(abs(weak_forecast - hidden) - global_error)
         strong_forecast = strong_fit.predict_mean(row.store_id, row.product_id)
         if strong_forecast is not None:
-            diff_strong.append(abs(strong_forecast - hidden) - global_error)
+            grouped_differences["hierarchical_strong"].setdefault(
+                (row.store_id, row.product_id), []
+            ).append(abs(strong_forecast - hidden) - global_error)
+
+    cluster_differences = {
+        name: [sum(values) / len(values) for values in groups.values() if values]
+        for name, groups in grouped_differences.items()
+    }
 
     def mean_value(values: Sequence[float]) -> float | None:
         return sum(values) / len(values) if values else None
 
-    def bootstrap_interval(values: Sequence[float], seed_value: int) -> tuple[float, float] | None:
+    def bootstrap_interval(
+        values: Sequence[float], seed_value: int
+    ) -> tuple[float, float] | None:
         if not values:
             return None
         rng = np.random.default_rng(seed_value)
@@ -1009,23 +1054,20 @@ def run_pooling_ablation(
             "estimates": strong_count,
         },
     }
-    paired_difference_vs_global = {
-        "independent": {
-            "mean_difference": mean_value(diff_independent),
-            "bootstrap_interval": bootstrap_interval(diff_independent, seed),
-            "paired_count": len(diff_independent),
-        },
-        "hierarchical_weak": {
-            "mean_difference": mean_value(diff_weak),
-            "bootstrap_interval": bootstrap_interval(diff_weak, seed + 1),
-            "paired_count": len(diff_weak),
-        },
-        "hierarchical_strong": {
-            "mean_difference": mean_value(diff_strong),
-            "bootstrap_interval": bootstrap_interval(diff_strong, seed + 2),
-            "paired_count": len(diff_strong),
-        },
-    }
+    paired_difference_vs_global = {}
+    for offset, name in enumerate(
+        ("independent", "hierarchical_weak", "hierarchical_strong")
+    ):
+        paired_difference_vs_global[name] = {
+            "mean_difference": mean_value(cluster_differences[name]),
+            "bootstrap_interval": bootstrap_interval(
+                cluster_differences[name], seed + offset
+            ),
+            "paired_count": sum(
+                len(values) for values in grouped_differences[name].values()
+            ),
+            "paired_clusters": len(cluster_differences[name]),
+        }
 
     return {
         "approaches": approaches,
@@ -1033,6 +1075,12 @@ def run_pooling_ablation(
         "conclusion": "evidence_reported_no_arbitrary_superiority_rule",
         "train_fraction": train_fraction,
         "seed": seed,
+        "config": {
+            "global_pooled": asdict(HierarchicalDemandConfig()),
+            "independent": asdict(HierarchicalDemandConfig()),
+            "hierarchical_weak": asdict(weak_config),
+            "hierarchical_strong": asdict(strong_config),
+        },
         "test_pairs": len(test_indices),
     }
 
@@ -1048,19 +1096,24 @@ def run_reproducible_study(
     Records are written to JSON (and a flattened CSV sibling) but the function
     is not invoked by the test suite.
     """
+    if not seeds:
+        raise ValueError("At least one seed is required")
+    if not history_lengths or any(days < 3 for days in history_lengths):
+        raise ValueError("history_lengths must contain at least three days")
+    if not 0 < train_fraction < 1:
+        raise ValueError("train_fraction must be between zero and one")
+    destination = Path(output_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
     records: list[dict[str, Any]] = []
     trial_id = 0
     for history_days in history_lengths:
         for seed in seeds:
             start = time.perf_counter()
-            dataset = make_synthetic_hierarchical_dataset(
-                days=history_days, seed=seed
-            )
-            train_indices, test_indices = _chronological_split(
-                dataset, train_fraction
-            )
+            dataset = make_synthetic_hierarchical_dataset(days=history_days, seed=seed)
+            train_indices, test_indices = _chronological_split(dataset, train_fraction)
             training = tuple(dataset.observations[index] for index in train_indices)
-            fit = fit_hierarchical_censored_demand(training)
+            fit_config = HierarchicalDemandConfig()
+            fit = fit_hierarchical_censored_demand(training, fit_config)
             summary = evaluate_hierarchical_holdout(
                 dataset, train_fraction=train_fraction, seed=100 + seed
             )
@@ -1084,6 +1137,10 @@ def run_reproducible_study(
                 "config": {
                     "train_fraction": train_fraction,
                     "dispersion": fit.dispersion,
+                    "store_prior_scale": fit_config.store_prior_scale,
+                    "product_prior_scale": fit_config.product_prior_scale,
+                    "max_iterations": fit_config.max_iterations,
+                    "bootstrap_seed": 100 + seed,
                 },
                 "train_test_boundaries": {
                     "train_days": len(train_indices),
@@ -1092,7 +1149,12 @@ def run_reproducible_study(
                     "test_indices": test_indices,
                 },
                 "model_identifiers": ["hierarchical_map"],
-                "baseline_identifiers": ["sales_mean", "moving_average"],
+                "baseline_identifiers": [
+                    "sales_mean",
+                    "moving_average",
+                    "global_pooled",
+                    "independent",
+                ],
                 "model_status": fit.status,
                 "forecast": forecasts,
                 "ground_truth_target": targets,
@@ -1101,13 +1163,20 @@ def run_reproducible_study(
                     "sales_mean_mae": summary.sales_mean_mae,
                     "moving_average_mae": summary.moving_average_mae,
                     "paired_mae_difference": summary.paired_mae_difference,
+                    "pooling_ablations": {
+                        name: metrics["mae"]
+                        for name, metrics in ablation["approaches"].items()
+                    },
                 },
                 "coverage_metrics": {
                     "interval_coverage": summary.interval_coverage,
                     "mean_interval_coverage": summary.mean_interval_coverage,
-                    "predictive_interval_coverage": summary.predictive_interval_coverage,
+                    "predictive_interval_coverage": (
+                        summary.predictive_interval_coverage
+                    ),
                 },
                 "paired_denominator": summary.paired_denominator,
+                "paired_clusters": summary.paired_clusters,
                 "bootstrap_interval": (
                     list(summary.bootstrap_mae_difference)
                     if summary.bootstrap_mae_difference is not None
@@ -1124,11 +1193,11 @@ def run_reproducible_study(
             records.append(record)
             trial_id += 1
 
-    with open(output_path, "w", encoding="utf-8") as handle:
+    with destination.open("w", encoding="utf-8") as handle:
         json.dump(records, handle, indent=2, default=str)
 
-    csv_path = output_path.rsplit(".", 1)[0] + ".csv"
-    with open(csv_path, "w", encoding="utf-8", newline="") as handle:
+    csv_path = destination.with_suffix(".csv")
+    with csv_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(
             [
@@ -1139,10 +1208,15 @@ def run_reproducible_study(
                 "hierarchical_mae",
                 "sales_mean_mae",
                 "moving_average_mae",
+                "global_pooled_mae",
+                "independent_mae",
+                "hierarchical_weak_mae",
+                "hierarchical_strong_mae",
                 "paired_mae_difference",
                 "mean_interval_coverage",
                 "predictive_interval_coverage",
                 "paired_denominator",
+                "paired_clusters",
                 "failed_pairs",
                 "abstained_pairs",
                 "runtime_seconds",
@@ -1159,10 +1233,15 @@ def run_reproducible_study(
                     record["error_metrics"]["hierarchical_mae"],
                     record["error_metrics"]["sales_mean_mae"],
                     record["error_metrics"]["moving_average_mae"],
+                    record["error_metrics"]["pooling_ablations"]["global_pooled"],
+                    record["error_metrics"]["pooling_ablations"]["independent"],
+                    record["error_metrics"]["pooling_ablations"]["hierarchical_weak"],
+                    record["error_metrics"]["pooling_ablations"]["hierarchical_strong"],
                     record["error_metrics"]["paired_mae_difference"],
                     record["coverage_metrics"]["mean_interval_coverage"],
                     record["coverage_metrics"]["predictive_interval_coverage"],
                     record["paired_denominator"],
+                    record["paired_clusters"],
                     record["numerical_failures"]["failed_pairs"],
                     record["numerical_failures"]["abstained_pairs"],
                     record["runtime_seconds"],
