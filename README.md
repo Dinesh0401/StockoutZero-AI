@@ -44,6 +44,39 @@ For a quick single-seed run:
 python -m research.phase3a --seeds 7 --history-lengths 30 --output results\phase3a-smoke.json
 ```
 
+Generate a synthetic calibration report:
+
+```powershell
+cd backend
+python -m research.calibrate --output calibration-report.json
+```
+
+## Production-style run
+
+Copy `.env.example` to `.env`, set a strong API key, configure allowed browser
+origins, and start the service:
+
+```powershell
+docker compose up --build
+```
+
+The API requires `X-Tenant-ID` when `STOCKOUTZERO_REQUIRE_TENANT=true`.
+When `STOCKOUTZERO_API_KEY` is set, clients must also send `X-API-Key`.
+The MVP never performs purchases automatically; reorder output requires human
+approval.
+
+POS exports can be validated through `POST /pos/import`. Use the CSV contract:
+
+```text
+day,sales,available_stock
+1,8,10
+2,12,
+```
+
+Unknown availability must be blank or represented as JSON `null`; it is never
+silently converted to zero. Health, readiness, and Prometheus-style text metrics
+are available at `/health`, `/ready`, and `/metrics`.
+
 Phase 3B currently provides a research-only finite-state Bayesian inventory
 filter in `research.uncertain_inventory`. It combines censored sales,
 receipts/removals, noisy ledger counts, and physical audits. It is not exposed
