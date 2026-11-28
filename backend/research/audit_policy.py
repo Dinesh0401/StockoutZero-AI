@@ -42,19 +42,16 @@ def _expected_unit_loss(
         expected_holding = 0.0
         expected_stockout = demand_mean
     else:
-        expected_holding = (
-            target_stock * float(nbinom.cdf(target_stock - 1, dispersion, probability))
-            - demand_mean
-            * float(nbinom.cdf(target_stock - 2, dispersion + 1, probability))
+        expected_holding = target_stock * float(
+            nbinom.cdf(target_stock - 1, dispersion, probability)
+        ) - demand_mean * float(
+            nbinom.cdf(target_stock - 2, dispersion + 1, probability)
         )
-        expected_stockout = (
-            demand_mean
-            * float(nbinom.sf(target_stock - 1, dispersion + 1, probability))
-            - target_stock * float(nbinom.sf(target_stock, dispersion, probability))
-        )
-    return (
-        costs.holding * max(expected_holding, 0.0)
-        + costs.stockout * max(expected_stockout, 0.0)
+        expected_stockout = demand_mean * float(
+            nbinom.sf(target_stock - 1, dispersion + 1, probability)
+        ) - target_stock * float(nbinom.sf(target_stock, dispersion, probability))
+    return costs.holding * max(expected_holding, 0.0) + costs.stockout * max(
+        expected_stockout, 0.0
     )
 
 
@@ -171,9 +168,10 @@ def recommend_stock_audit(
         for stock in range(len(distribution))
     ]
     loss_without_audit_by_order = [
-        sum(weight * losses[order] for weight, losses in zip(
-            distribution, losses_by_stock, strict=True
-        ))
+        sum(
+            weight * losses[order]
+            for weight, losses in zip(distribution, losses_by_stock, strict=True)
+        )
         for order in range(max_order_units + 1)
     ]
     optimal_order_without_audit = min(
