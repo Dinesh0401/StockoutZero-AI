@@ -23,3 +23,6 @@ jobs:
       - run: python -m ruff format --check app research tests
       - run: python -m ruff check app research tests
       - run: python -m mypy app research
+      - run: python -m research.calibrate --history-lengths 30 --seeds 7 --output calibration-report.json
+      - run: |
+          python -c "import subprocess,time,urllib.request; p=subprocess.Popen(['python','-m','uvicorn','app.main:app','--host','127.0.0.1','--port','8000']); time.sleep(3); print(urllib.request.urlopen('http://127.0.0.1:8000/health').read().decode()); p.terminate(); p.wait(timeout=10)"

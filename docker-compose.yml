@@ -1,0 +1,10 @@
+services:
+  stockoutzero:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      STOCKOUTZERO_API_KEY: ${STOCKOUTZERO_API_KEY:-change-me}
+      STOCKOUTZERO_REQUIRE_TENANT: ${STOCKOUTZERO_REQUIRE_TENANT:-true}
+      STOCKOUTZERO_CORS_ORIGINS: ${STOCKOUTZERO_CORS_ORIGINS:-http://127.0.0.1:8000}
+    restart: unless-stopped
