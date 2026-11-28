@@ -80,7 +80,7 @@ def test_missing_or_invalid_inventory_distribution_abstains() -> None:
         audit_cost=1.0,
     )
     invalid = recommend_stock_audit(
-        _inventory_estimate((0.5, 0.5)),
+        _inventory_estimate((0.5, 0.6)),
         demand_mean=2.0,
         demand_dispersion=4.0,
         audit_cost=1.0,

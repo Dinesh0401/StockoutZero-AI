@@ -199,6 +199,30 @@ The audit decision must include:
 The system must remain a human decision aid. It must not automatically count
 stock or place orders in the MVP.
 
+### Phase 3C initial implementation
+
+`backend/research/audit_policy.py` implements a one-period value-of-information
+policy over the inventory distribution produced by the Phase 3B filter. For
+every possible recorded-stock count it evaluates whole-unit order actions under
+fixed purchase, holding, and lost-sales costs and NB2 demand. It also computes
+the order action that would be chosen before the audit, using the current
+inventory distribution. The expected benefit is the optimized expected loss
+before the audit minus the optimized expected loss after a hypothetical exact
+audit. The result recommends an audit only when that benefit is strictly
+greater than the configured audit cost; otherwise it defers.
+
+Outputs include exact and net expected benefit, stockout probability, demand
+and inventory uncertainty, the pre-audit optimal order, the expected post-audit
+order, and an order decision for each audited stock count. Missing or invalid
+inventory distributions return `insufficient_information`.
+
+This implementation is a research decision aid, not a validated audit policy.
+It assumes exact post-audit inventory, a fixed demand distribution, no supplier
+lead time or case-pack constraint, and costs supplied by the caller. It does
+not execute stock counts or purchasing. Real-world calibration, decision
+threshold policy, lead-time actions, case packs, and controlled merchant
+evaluation remain required.
+
 ## Data contracts
 
 The implementation will define explicit domain types for:

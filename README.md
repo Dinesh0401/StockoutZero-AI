@@ -49,6 +49,11 @@ filter in `research.uncertain_inventory`. It combines censored sales,
 receipts/removals, noisy ledger counts, and physical audits. It is not exposed
 through the production API and requires calibrated demand and shrinkage inputs.
 
+Phase 3C provides a research-only cost-aware audit recommendation in
+`research.audit_policy`. It compares expected inventory losses with and without
+an exact audit and returns `recommend`, `defer`, or
+`insufficient_information`. It does not place orders or require an audit.
+
 Quality checks:
 
 ```powershell
